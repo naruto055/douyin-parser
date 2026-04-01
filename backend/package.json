@@ -5,7 +5,8 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "node app.js"
+    "dev": "node app.js",
+    "test": "node --test --experimental-test-isolation=none \"tests/**/*.test.js\""
   },
   "dependencies": {
     "express": "^4.19.2",
