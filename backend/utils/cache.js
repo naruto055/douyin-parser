@@ -36,7 +36,10 @@ function cleanup() {
   }
 }
 
-setInterval(cleanup, 60000);
+const cleanupTimer = setInterval(cleanup, 60000);
+if (typeof cleanupTimer.unref === 'function') {
+  cleanupTimer.unref();
+}
 
 module.exports = {
   set,

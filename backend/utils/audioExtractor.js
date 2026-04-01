@@ -93,7 +93,10 @@ function cleanupOldFiles(maxAge = 3600000) {
   }
 }
 
-setInterval(() => cleanupOldFiles(), 3600000);
+const cleanupTimer = setInterval(() => cleanupOldFiles(), 3600000);
+if (typeof cleanupTimer.unref === 'function') {
+  cleanupTimer.unref();
+}
 
 module.exports = {
   extractAudio,
