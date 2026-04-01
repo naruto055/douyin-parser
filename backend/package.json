@@ -1,0 +1,27 @@
+{
+  "name": "douyin-parser-backend",
+  "version": "1.0.0",
+  "description": "抖音音频解析工具 - 后端服务",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.4.1",
+    "puppeteer": "^21.11.0",
+    "puppeteer-cluster": "^0.23.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "axios": "^1.7.9",
+    "fluent-ffmpeg": "^2.1.2",
+    "ffmpeg-static": "^5.2.0",
+    "uuid": "^9.0.1"
+  },
+  "engines": {
+    "node": "&gt;=18.0.0"
+  },
+  "license": "MIT"
+}
