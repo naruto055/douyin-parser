@@ -14,7 +14,8 @@
 
 ### 速率限制
 
-- 限制：每分钟 20 次请求
+- 普通解析接口：每分钟 20 次请求
+- AI 对话接口 `POST /api/ai/chat`：每分钟 10 次请求
 - 超出限制返回：429 Too Many Requests
 
 ### 响应格式
@@ -159,6 +160,72 @@ GET /api/download?type=audio&url=https://v.douyin.com/xxxxx/
 
 ---
 
+### 4. AI 对话解析
+
+通过自然语言与 AI 交互，自动识别消息中的抖音链接或分享文案，并调用解析能力返回结果。
+
+**请求**:
+```http
+POST /api/ai/chat
+Content-Type: application/json
+
+{
+  "message": "帮我解析这个抖音链接 https://v.douyin.com/xxxxx/",
+  "sessionId": "optional-session-id"
+}
+```
+
+**参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| message | string | 是 | 用户输入的自然语言消息，可包含抖音链接或分享文案 |
+| sessionId | string | 否 | 会话 ID，不传时由后端生成 |
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "data": {
+    "reply": "解析成功，这个视频的标题是示例标题，作者是示例作者。",
+    "sessionId": "f4df1d0b-cb2b-49ca-bfe3-7262d5e9ec67",
+    "parsedData": {
+      "source": "puppeteer",
+      "title": "示例标题",
+      "author": "示例作者",
+      "cover": "https://.../cover.jpg",
+      "duration": 15000,
+      "videoUrl": "https://.../video.mp4",
+      "audioUrl": "https://.../audio.mp3",
+      "audioReady": true,
+      "shareUrl": "https://v.douyin.com/xxxxx/"
+    }
+  }
+}
+```
+
+**响应字段说明**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| reply | string | AI 的自然语言回复 |
+| sessionId | string | 会话 ID，用于连续对话 |
+| parsedData | object \| null | 当消息触发了解析时返回结构化解析结果 |
+| parsedData.shareUrl | string | 原始分享链接，便于前端复用下载接口 |
+
+**行为说明**:
+- 默认走 OpenAI 兼容 `chat.completions`
+- 当模型未稳定触发工具调用时，后端会尝试从消息中提取抖音链接并直接执行解析
+- AI 不会臆造视频内容，只会基于工具结果回复
+
+**错误响应示例**:
+```json
+{
+  "success": false,
+  "error": "LLM API key is not configured"
+}
+```
+
+---
+
 ## 错误码说明
 
 | HTTP 状态码 | 说明 |
@@ -184,6 +251,13 @@ curl http://localhost:3000/api/health
 curl -X POST http://localhost:3000/api/parse \
   -H "Content-Type: application/json" \
   -d '{"url": "https://v.douyin.com/xxxxx/"}'
+```
+
+**AI 对话解析**:
+```bash
+curl -X POST http://localhost:3000/api/ai/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"帮我解析这个抖音链接 https://v.douyin.com/xxxxx/"}'
 ```
 
 **下载视频（简化调用）**:
@@ -252,3 +326,15 @@ async function parseAndDownload(shareUrl) {
 | rateLimit.max | 20 | 窗口内最大请求数 |
 | cacheEnabled | true | 是否启用解析结果缓存 |
 | cacheTTL | 3600000 | 缓存有效期（毫秒，1小时） |
+
+### AI 相关配置
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| ai.enabled | true | 是否启用 AI 对话能力 |
+| ai.provider | openai-compatible | 模型提供方类型 |
+| ai.baseURL | https://api.openai.com/v1 | OpenAI 兼容接口地址 |
+| ai.model | gpt-4.1-mini | 默认模型名称 |
+| ai.sessionLimit | 10 | 每个会话保留的最近消息轮数 |
+| ai.requestTimeoutMs | 30000 | 模型请求超时时间 |
+| ai.rateLimit.max | 10 | AI 接口窗口内最大请求数 |
