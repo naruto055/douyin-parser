@@ -4,6 +4,7 @@ const path = require('path');
 
 const config = require('./config');
 const apiRoutes = require('./routes/api');
+const aiRoutes = require('./routes/ai');
 const errorHandler = require('./middleware/errorHandler');
 const { apiLimiter } = require('./middleware/rateLimit');
 const browserPool = require('./utils/browserPool');
@@ -26,6 +27,7 @@ app.get('/api/health', (req, res) => {
   res.json({ success: true, message: 'Service is running', timestamp: new Date().toISOString() });
 });
 
+app.use('/api/ai', aiRoutes);
 app.use('/api', apiLimiter);
 app.use('/api', apiRoutes);
 

@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>抖音解析 AI 助手</title>
+    <style>
+      :root {
+        --bg: linear-gradient(160deg, #0f172a 0%, #111827 45%, #1f2937 100%);
+        --panel: rgba(15, 23, 42, 0.78);
+        --panel-border: rgba(148, 163, 184, 0.18);
+        --text: #e5eef9;
+        --muted: #a8b3c7;
+        --accent: #f97316;
+        --accent-2: #22c55e;
+        --danger: #f87171;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", "PingFang SC", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .page {
+        width: min(980px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 40px 0 56px;
+      }
+
+      .hero,
+      .panel {
+        background: var(--panel);
+        backdrop-filter: blur(18px);
+        border: 1px solid var(--panel-border);
+        border-radius: 24px;
+        box-shadow: 0 18px 80px rgba(15, 23, 42, 0.32);
+      }
+
+      .hero {
+        padding: 28px;
+        margin-bottom: 20px;
+      }
+
+      .hero h1 {
+        margin: 0 0 10px;
+        font-size: clamp(28px, 6vw, 44px);
+      }
+
+      .hero p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .panel {
+        padding: 24px;
+      }
+
+      .composer {
+        display: grid;
+        gap: 12px;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 140px;
+        padding: 16px;
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 18px;
+        background: rgba(15, 23, 42, 0.72);
+        color: var(--text);
+        resize: vertical;
+        font: inherit;
+      }
+
+      button {
+        border: none;
+        border-radius: 999px;
+        padding: 12px 22px;
+        background: linear-gradient(120deg, var(--accent), #fb7185);
+        color: white;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        justify-self: start;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+
+      .hint,
+      .status {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .chat {
+        display: grid;
+        gap: 16px;
+        margin-top: 24px;
+      }
+
+      .bubble {
+        padding: 16px 18px;
+        border-radius: 20px;
+        line-height: 1.7;
+      }
+
+      .bubble.user {
+        background: rgba(249, 115, 22, 0.16);
+        border: 1px solid rgba(249, 115, 22, 0.22);
+      }
+
+      .bubble.assistant {
+        background: rgba(34, 197, 94, 0.12);
+        border: 1px solid rgba(34, 197, 94, 0.22);
+      }
+
+      .result-card {
+        margin-top: 16px;
+        padding: 18px;
+        border-radius: 20px;
+        background: rgba(15, 23, 42, 0.68);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+      }
+
+      .result-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .result-item {
+        padding: 12px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .result-item strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .actions a {
+        text-decoration: none;
+        color: white;
+        border-radius: 999px;
+        padding: 10px 18px;
+        background: linear-gradient(120deg, #0ea5e9, #22c55e);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <h1>抖音解析 AI 助手</h1>
+        <p>输入抖音分享链接或分享文案，AI 会自动调用解析服务并给出结果说明。当前页面是仓库内置的最小静态入口，便于联调与演示。</p>
+      </section>
+
+      <section class="panel">
+        <div class="composer">
+          <textarea id="message" placeholder="例如：帮我解析这个抖音链接 https://v.douyin.com/xxxxx/"></textarea>
+          <button id="sendButton" type="button">发送并解析</button>
+          <div class="hint">AI 功能需要在后端配置 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 等环境变量。</div>
+          <div id="status" class="status"></div>
+        </div>
+
+        <div id="chat" class="chat"></div>
+      </section>
+    </main>
+
+    <script>
+      const messageEl = document.getElementById('message');
+      const chatEl = document.getElementById('chat');
+      const statusEl = document.getElementById('status');
+      const sendButtonEl = document.getElementById('sendButton');
+
+      const sessionId = localStorage.getItem('ai-session-id') || '';
+
+      function renderBubble(role, content) {
+        const bubble = document.createElement('div');
+        bubble.className = `bubble ${role}`;
+        bubble.textContent = content;
+        chatEl.prepend(bubble);
+      }
+
+      function renderParsedData(parsedData) {
+        if (!parsedData) return;
+
+        const card = document.createElement('div');
+        card.className = 'result-card';
+
+        const durationSeconds = parsedData.duration ? Math.round(parsedData.duration / 1000) : 0;
+        card.innerHTML = `
+          <strong>解析结果</strong>
+          <div class="result-grid">
+            <div class="result-item"><strong>标题</strong>${parsedData.title || '未知'}</div>
+            <div class="result-item"><strong>作者</strong>${parsedData.author || '未知'}</div>
+            <div class="result-item"><strong>时长</strong>${durationSeconds ? `${durationSeconds} 秒` : '未知'}</div>
+            <div class="result-item"><strong>音频直链</strong>${parsedData.audioReady ? '可直接获取' : '暂无直链'}</div>
+          </div>
+        `;
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+
+        if (parsedData.shareUrl) {
+          const videoLink = document.createElement('a');
+          videoLink.href = `/api/download?type=video&url=${encodeURIComponent(parsedData.shareUrl)}&title=${encodeURIComponent(parsedData.title || 'douyin_video')}`;
+          videoLink.textContent = '下载视频';
+          actions.appendChild(videoLink);
+        }
+
+        if (parsedData.shareUrl) {
+          const audioLink = document.createElement('a');
+          audioLink.href = `/api/download?type=audio&url=${encodeURIComponent(parsedData.shareUrl)}&title=${encodeURIComponent(parsedData.title || 'douyin_audio')}`;
+          audioLink.textContent = '下载音频';
+          actions.appendChild(audioLink);
+        }
+
+        if (actions.children.length > 0) {
+          card.appendChild(actions);
+        }
+
+        chatEl.prepend(card);
+      }
+
+      async function sendMessage() {
+        const message = messageEl.value.trim();
+        if (!message) {
+          statusEl.textContent = '请输入消息或抖音链接。';
+          statusEl.className = 'status error';
+          return;
+        }
+
+        sendButtonEl.disabled = true;
+        statusEl.textContent = 'AI 正在解析，请稍候...';
+        statusEl.className = 'status';
+
+        renderBubble('user', message);
+
+        try {
+          const response = await fetch('/api/ai/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              message,
+              sessionId: localStorage.getItem('ai-session-id') || undefined
+            })
+          });
+
+          const result = await response.json();
+
+          if (!response.ok || !result.success) {
+            throw new Error(result.error || '请求失败');
+          }
+
+          if (result.data.sessionId) {
+            localStorage.setItem('ai-session-id', result.data.sessionId);
+          }
+
+          renderBubble('assistant', result.data.reply);
+          renderParsedData(result.data.parsedData);
+          statusEl.textContent = '解析完成。';
+        } catch (error) {
+          statusEl.textContent = error.message || 'AI 请求失败';
+          statusEl.className = 'status error';
+        } finally {
+          sendButtonEl.disabled = false;
+        }
+      }
+
+      sendButtonEl.addEventListener('click', sendMessage);
+    </script>
+  </body>
+</html>
