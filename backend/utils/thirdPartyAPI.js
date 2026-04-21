@@ -1,6 +1,12 @@
 const axios = require('axios');
 const config = require('../config');
 
+/**
+ * 调用新叶接口解析抖音链接。
+ *
+ * @param {string} url 抖音链接
+ * @returns {Promise<object>} 统一结构的解析结果
+ */
 async function callXinyeApi(url) {
   try {
     const response = await axios.get('https://api.xinyew.cn/api/douyinjx', {
@@ -14,6 +20,12 @@ async function callXinyeApi(url) {
   }
 }
 
+/**
+ * 调用创新接口解析抖音链接。
+ *
+ * @param {string} url 抖音链接
+ * @returns {Promise<object>} 统一结构的解析结果
+ */
 async function callChuangxinApi(url) {
   try {
     const response = await axios.get('https://apis.jxcxin.cn/api/douyin', {
@@ -27,6 +39,12 @@ async function callChuangxinApi(url) {
   }
 }
 
+/**
+ * 调用 Devtool 接口解析抖音链接。
+ *
+ * @param {string} url 抖音链接
+ * @returns {Promise<object>} 统一结构的解析结果
+ */
 async function callDevtoolApi(url) {
   try {
     const response = await axios.get('https://www.devtool.top/api/douyin/parse', {
@@ -40,6 +58,13 @@ async function callDevtoolApi(url) {
   }
 }
 
+/**
+ * 将不同第三方接口的返回值归一化为统一字段结构。
+ *
+ * @param {any} data 第三方接口原始响应
+ * @param {'xinyew' | 'jxcxin' | 'devtool'} source 数据来源
+ * @returns {object} 统一结构的解析结果
+ */
 function normalizeResponse(data, source) {
   let result = { source };
 
@@ -59,6 +84,7 @@ function normalizeResponse(data, source) {
       throw new Error(data.msg || data.message || 'Xinye API error');
     }
   } else if (source === 'jxcxin') {
+    // 三方接口字段含义接近，但成功判定与字段命名并不完全一致，因此统一在此收口。
     if (data.code === 200 || data.success) {
       const d = data.data || data;
       result = {
@@ -90,10 +116,17 @@ function normalizeResponse(data, source) {
     }
   }
 
+  // 统一补充音频可用性标识，减少下游业务判断分支。
   result.audioReady = !!result.audioUrl;
   return result;
 }
 
+/**
+ * 顺序尝试多个第三方解析接口，直到某个接口成功返回可用结果。
+ *
+ * @param {string} url 抖音链接
+ * @returns {Promise<object>} 统一结构的解析结果
+ */
 async function parseWithThirdParty(url) {
   const apis = [callXinyeApi, callChuangxinApi, callDevtoolApi];
 
@@ -104,6 +137,7 @@ async function parseWithThirdParty(url) {
       console.log(`Third-party API succeeded: ${api.name}`);
       return result;
     } catch (error) {
+      // 单个服务失败不立即终止，继续尝试下一个可用提供方。
       console.log(`${api.name} failed, trying next...`);
       continue;
     }
