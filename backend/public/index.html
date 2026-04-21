@@ -190,13 +190,21 @@
       </section>
     </main>
 
+    <script src="./chatApi.js"></script>
     <script>
       const messageEl = document.getElementById('message');
       const chatEl = document.getElementById('chat');
       const statusEl = document.getElementById('status');
       const sendButtonEl = document.getElementById('sendButton');
+      const apiBaseHintEl = document.querySelector('.hint');
+      const chatEndpoint = ChatApi.buildApiUrl('/api/ai/chat', window.location);
+      const downloadEndpoint = ChatApi.buildApiUrl('/api/download', window.location);
 
       const sessionId = localStorage.getItem('ai-session-id') || '';
+
+      if (window.location.protocol === 'file:') {
+        apiBaseHintEl.textContent = '当前页面通过 file:// 打开，请确保后端运行在 http://localhost:3000。AI 功能仍需要配置 LLM_API_KEY、LLM_BASE_URL、LLM_MODEL 等环境变量。';
+      }
 
       function renderBubble(role, content) {
         const bubble = document.createElement('div');
@@ -227,14 +235,14 @@
 
         if (parsedData.shareUrl) {
           const videoLink = document.createElement('a');
-          videoLink.href = `/api/download?type=video&url=${encodeURIComponent(parsedData.shareUrl)}&title=${encodeURIComponent(parsedData.title || 'douyin_video')}`;
+          videoLink.href = `${downloadEndpoint}?type=video&url=${encodeURIComponent(parsedData.shareUrl)}&title=${encodeURIComponent(parsedData.title || 'douyin_video')}`;
           videoLink.textContent = '下载视频';
           actions.appendChild(videoLink);
         }
 
         if (parsedData.shareUrl) {
           const audioLink = document.createElement('a');
-          audioLink.href = `/api/download?type=audio&url=${encodeURIComponent(parsedData.shareUrl)}&title=${encodeURIComponent(parsedData.title || 'douyin_audio')}`;
+          audioLink.href = `${downloadEndpoint}?type=audio&url=${encodeURIComponent(parsedData.shareUrl)}&title=${encodeURIComponent(parsedData.title || 'douyin_audio')}`;
           audioLink.textContent = '下载音频';
           actions.appendChild(audioLink);
         }
@@ -261,7 +269,7 @@
         renderBubble('user', message);
 
         try {
-          const response = await fetch('/api/ai/chat', {
+          const response = await fetch(chatEndpoint, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
