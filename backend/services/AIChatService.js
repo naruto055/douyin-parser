@@ -36,6 +36,7 @@ class AIChatService {
     const userMessage = { role: 'user', content: String(message).trim() };
 
     let parsedData = null;
+    let thinking = '';
     let reply = '';
 
     console.log(`[AI] provider=${provider.getName()} model=${config.ai.model} session=${resolvedSessionId}`);
@@ -70,7 +71,7 @@ class AIChatService {
           ]
         });
 
-        reply = finalResponse.content || this._buildFallbackReply(parsedData);
+        ({ thinking, reply } = this._normalizeAssistantReply(finalResponse.content, parsedData));
       } else {
         const extractedUrl = extractUrlFromText(userMessage.content);
         if (extractedUrl) {
@@ -89,9 +90,9 @@ class AIChatService {
             ]
           });
 
-          reply = fallbackResponse.content || this._buildFallbackReply(parsedData);
+          ({ thinking, reply } = this._normalizeAssistantReply(fallbackResponse.content, parsedData));
         } else {
-          reply = initialResponse.content || '请发送抖音分享链接或包含链接的分享文案，我可以帮你解析。';
+          ({ thinking, reply } = this._normalizeAssistantReply(initialResponse.content, null));
         }
       }
     } catch (error) {
@@ -106,6 +107,7 @@ class AIChatService {
     this._saveSession(resolvedSessionId, userMessage, reply);
 
     return {
+      thinking,
       reply,
       sessionId: resolvedSessionId,
       parsedData
@@ -132,6 +134,35 @@ class AIChatService {
     ].slice(-config.ai.sessionLimit * 2);
 
     sessions.set(sessionId, nextHistory);
+  }
+
+  static _normalizeAssistantReply(content, parsedData) {
+    const { thinking, reply } = this._splitThinkingAndReply(content);
+
+    return {
+      thinking,
+      reply: reply || this._buildFallbackReply(parsedData)
+    };
+  }
+
+  static _splitThinkingAndReply(content) {
+    const normalizedContent = typeof content === 'string' ? content.trim() : '';
+    const thinkMatch = normalizedContent.match(/<think>([\s\S]*?)<\/think>/i);
+
+    if (!thinkMatch) {
+      return {
+        thinking: '',
+        reply: normalizedContent
+      };
+    }
+
+    const thinking = thinkMatch[1].trim();
+    const reply = `${normalizedContent.slice(0, thinkMatch.index)}${normalizedContent.slice(thinkMatch.index + thinkMatch[0].length)}`.trim();
+
+    return {
+      thinking,
+      reply
+    };
   }
 
   static async _executeToolCalls(toolCalls) {

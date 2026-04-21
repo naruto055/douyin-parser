@@ -92,10 +92,12 @@ TODO：
 - [x] 根据 `audioReady` 展示下载建议
 - [x] 复用现有 `/api/download`
 - [x] 补齐加载态、错误态、空态
+- [x] 将 AI 回复改造为 `thinking + reply` 结构化展示
 
 阶段完成说明：
 - 已在 `backend/public/index.html` 提供最小静态联调页
 - 已支持显示解析结果并联动下载
+- 已支持在页面中分开展示思考过程与最终回答
 - 下一阶段起始任务：增加测试覆盖
 
 ### 阶段 6：测试与验收
@@ -105,6 +107,7 @@ TODO：
 - [x] 增加 `parseDouyinVideoTool` 单元测试
 - [x] 增加 `AIChatService` 单元测试
 - [x] 增加 `/api/ai/chat` 路由层测试
+- [x] 增加 `thinking + reply` 拆分测试
 - [x] 验证缓存命中场景
 - [x] 验证 OpenAI 兼容 provider 配置场景
 - [ ] 验证 DeepSeek 配置场景
@@ -124,6 +127,7 @@ TODO：
 
 TODO：
 - [x] 更新后端 API 文档，新增 `/api/ai/chat`
+- [x] 更新 `/api/ai/chat` 响应文档，补充 `thinking` 字段说明
 - [x] 补充 AI 环境变量说明
 - [x] 补充 OpenAI / DeepSeek / 通义配置示例
 - [x] 补充已知限制与降级策略说明
@@ -150,3 +154,4 @@ TODO：
 - 目前只支持 OpenAI 兼容 `chat.completions`
 - 当前前端入口为静态联调页，不是完整独立前端工程
 - AI 不会理解视频内容本身，只会基于解析元数据回复
+- 当前仍为非流式响应，本期未实现 SSE、WebSocket 或 `/api/ai/chat/stream`

@@ -186,6 +186,7 @@ Content-Type: application/json
 {
   "success": true,
   "data": {
+    "thinking": "用户提供了有效抖音链接，我先基于工具结果整理结构化信息，再给出简短说明。",
     "reply": "解析成功，这个视频的标题是示例标题，作者是示例作者。",
     "sessionId": "f4df1d0b-cb2b-49ca-bfe3-7262d5e9ec67",
     "parsedData": {
@@ -206,7 +207,8 @@ Content-Type: application/json
 **响应字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| reply | string | AI 的自然语言回复 |
+| thinking | string | 模型思考过程；无思考内容时返回空字符串 |
+| reply | string | AI 的最终自然语言回复，已剥离 `<think>...</think>` 思考内容 |
 | sessionId | string | 会话 ID，用于连续对话 |
 | parsedData | object \| null | 当消息触发了解析时返回结构化解析结果 |
 | parsedData.shareUrl | string | 原始分享链接，便于前端复用下载接口 |

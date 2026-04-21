@@ -129,6 +129,37 @@
         border: 1px solid rgba(34, 197, 94, 0.22);
       }
 
+      .assistant-message {
+        display: grid;
+        gap: 12px;
+      }
+
+      .assistant-section {
+        padding: 16px 18px;
+        border-radius: 20px;
+        line-height: 1.7;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .assistant-section.thinking {
+        background: rgba(148, 163, 184, 0.1);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+      }
+
+      .assistant-section.reply {
+        background: rgba(34, 197, 94, 0.12);
+        border: 1px solid rgba(34, 197, 94, 0.22);
+      }
+
+      .assistant-section-title {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+      }
+
       .result-card {
         margin-top: 16px;
         padding: 18px;
@@ -206,11 +237,67 @@
         apiBaseHintEl.textContent = '当前页面通过 file:// 打开，请确保后端运行在 http://localhost:3000。AI 功能仍需要配置 LLM_API_KEY、LLM_BASE_URL、LLM_MODEL 等环境变量。';
       }
 
+      function createTextSection(title, content, className) {
+        const section = document.createElement('section');
+        section.className = `assistant-section ${className}`;
+
+        const titleEl = document.createElement('strong');
+        titleEl.className = 'assistant-section-title';
+        titleEl.textContent = title;
+
+        const contentEl = document.createElement('div');
+        contentEl.textContent = content;
+
+        section.appendChild(titleEl);
+        section.appendChild(contentEl);
+        return section;
+      }
+
       function renderBubble(role, content) {
         const bubble = document.createElement('div');
         bubble.className = `bubble ${role}`;
         bubble.textContent = content;
         chatEl.prepend(bubble);
+      }
+
+      function renderThinkingBlock(content) {
+        if (!content) {
+          return null;
+        }
+
+        return createTextSection('思考过程', content, 'thinking');
+      }
+
+      function renderReplyBlock(content) {
+        return createTextSection('最终回答', content, 'reply');
+      }
+
+      function renderAssistantMessage(data) {
+        const container = document.createElement('div');
+        container.className = 'assistant-message';
+
+        const thinkingBlock = renderThinkingBlock(data.thinking);
+        if (thinkingBlock) {
+          container.appendChild(thinkingBlock);
+        }
+
+        container.appendChild(renderReplyBlock(data.reply));
+        chatEl.prepend(container);
+      }
+
+      function createResultItem(label, value) {
+        const item = document.createElement('div');
+        item.className = 'result-item';
+
+        const labelEl = document.createElement('strong');
+        labelEl.textContent = label;
+
+        const valueEl = document.createElement('div');
+        valueEl.textContent = value;
+
+        item.appendChild(labelEl);
+        item.appendChild(valueEl);
+        return item;
       }
 
       function renderParsedData(parsedData) {
@@ -219,16 +306,19 @@
         const card = document.createElement('div');
         card.className = 'result-card';
 
+        const titleEl = document.createElement('strong');
+        titleEl.textContent = '解析结果';
+        card.appendChild(titleEl);
+
+        const grid = document.createElement('div');
+        grid.className = 'result-grid';
+
         const durationSeconds = parsedData.duration ? Math.round(parsedData.duration / 1000) : 0;
-        card.innerHTML = `
-          <strong>解析结果</strong>
-          <div class="result-grid">
-            <div class="result-item"><strong>标题</strong>${parsedData.title || '未知'}</div>
-            <div class="result-item"><strong>作者</strong>${parsedData.author || '未知'}</div>
-            <div class="result-item"><strong>时长</strong>${durationSeconds ? `${durationSeconds} 秒` : '未知'}</div>
-            <div class="result-item"><strong>音频直链</strong>${parsedData.audioReady ? '可直接获取' : '暂无直链'}</div>
-          </div>
-        `;
+        grid.appendChild(createResultItem('标题', parsedData.title || '未知'));
+        grid.appendChild(createResultItem('作者', parsedData.author || '未知'));
+        grid.appendChild(createResultItem('时长', durationSeconds ? `${durationSeconds} 秒` : '未知'));
+        grid.appendChild(createResultItem('音频直链', parsedData.audioReady ? '可直接获取' : '暂无直链'));
+        card.appendChild(grid);
 
         const actions = document.createElement('div');
         actions.className = 'actions';
@@ -290,7 +380,7 @@
             localStorage.setItem('ai-session-id', result.data.sessionId);
           }
 
-          renderBubble('assistant', result.data.reply);
+          renderAssistantMessage(result.data);
           renderParsedData(result.data.parsedData);
           statusEl.textContent = '解析完成。';
         } catch (error) {

@@ -40,6 +40,7 @@ test('AI 路由在成功时返回统一结构', async () => {
   const handler = layer.route.stack[1].handle;
 
   AIChatService.chat = async () => ({
+    thinking: '思考内容',
     reply: 'ok',
     sessionId: 'session-1',
     parsedData: { title: 'demo' }
@@ -55,6 +56,7 @@ test('AI 路由在成功时返回统一结构', async () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(res.payload.success, true);
+    assert.equal(res.payload.data.thinking, '思考内容');
     assert.equal(res.payload.data.reply, 'ok');
   } finally {
     AIChatService.chat = originalChat;
