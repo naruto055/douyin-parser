@@ -154,4 +154,6 @@ TODO：
 - 目前只支持 OpenAI 兼容 `chat.completions`
 - 当前前端入口为静态联调页，不是完整独立前端工程
 - AI 不会理解视频内容本身，只会基于解析元数据回复
-- 当前仍为非流式响应，本期未实现 SSE、WebSocket 或 `/api/ai/chat/stream`
+- [x] 新增 `/api/ai/chat/stream`
+- [x] 保留 `/api/ai/chat` 非流式兼容接口
+- [x] 静态演示页支持 SSE 增量渲染

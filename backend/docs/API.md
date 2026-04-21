@@ -15,7 +15,7 @@
 ### 速率限制
 
 - 普通解析接口：每分钟 20 次请求
-- AI 对话接口 `POST /api/ai/chat`：每分钟 10 次请求
+- AI 对话接口 `POST /api/ai/chat`、`POST /api/ai/chat/stream`：每分钟 10 次请求
 - 超出限制返回：429 Too Many Requests
 
 ### 响应格式
@@ -189,6 +189,10 @@ Content-Type: application/json
     "thinking": "用户提供了有效抖音链接，我先基于工具结果整理结构化信息，再给出简短说明。",
     "reply": "解析成功，这个视频的标题是示例标题，作者是示例作者。",
     "sessionId": "f4df1d0b-cb2b-49ca-bfe3-7262d5e9ec67",
+    "toolStatus": {
+      "status": "resolved",
+      "warnings": []
+    },
     "parsedData": {
       "source": "puppeteer",
       "title": "示例标题",
@@ -210,6 +214,9 @@ Content-Type: application/json
 | thinking | string | 模型思考过程；无思考内容时返回空字符串 |
 | reply | string | AI 的最终自然语言回复，已剥离 `<think>...</think>` 思考内容 |
 | sessionId | string | 会话 ID，用于连续对话 |
+| toolStatus | object \| null | 解析工具结果的确定性状态；未触发解析时返回 `null` |
+| toolStatus.status | string | 当前支持 `resolved`、`suspect` |
+| toolStatus.warnings | string[] | 状态告警码列表，例如 `placeholder_share_url` |
 | parsedData | object \| null | 当消息触发了解析时返回结构化解析结果 |
 | parsedData.shareUrl | string | 原始分享链接，便于前端复用下载接口 |
 
@@ -217,6 +224,7 @@ Content-Type: application/json
 - 默认走 OpenAI 兼容 `chat.completions`
 - 当模型未稳定触发工具调用时，后端会尝试从消息中提取抖音链接并直接执行解析
 - AI 不会臆造视频内容，只会基于工具结果回复
+- `toolStatus` 表示工具结果的可信度判断，不等价于模型最终业务结论
 
 **错误响应示例**:
 ```json
@@ -225,6 +233,70 @@ Content-Type: application/json
   "error": "LLM API key is not configured"
 }
 ```
+
+---
+
+### 5. AI 流式对话解析
+
+通过 SSE 按事件流返回 AI 对话过程，适合前端渐进展示思考过程、解析进度和最终回答。
+
+**请求**:
+```http
+POST /api/ai/chat/stream
+Accept: text/event-stream
+Content-Type: application/json
+
+{
+  "message": "帮我解析这个抖音链接 https://v.douyin.com/xxxxx/",
+  "sessionId": "optional-session-id"
+}
+```
+
+**参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| message | string | 是 | 用户输入的自然语言消息，可包含抖音链接或分享文案 |
+| sessionId | string | 否 | 会话 ID，不传时由后端生成 |
+
+**响应头**:
+```http
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-cache, no-transform
+Connection: keep-alive
+```
+
+**事件顺序**:
+- `session`：返回本次会话 ID
+- `progress`：返回当前处理阶段文案
+- `thinking_delta`：返回思考内容增量
+- `reply_delta`：返回最终回答增量
+- `tool_result`：返回完整解析结果对象与状态元信息
+- `done`：返回最终完整结果，结构与 `/api/ai/chat` 的 `data` 一致
+- `error`：流式过程中出现错误时返回
+
+**事件示例**:
+```text
+event: session
+data: {"sessionId":"f4df1d0b-cb2b-49ca-bfe3-7262d5e9ec67"}
+
+event: progress
+data: {"stage":"model_start","message":"AI 正在分析输入"}
+
+event: tool_result
+data: {"toolStatus":{"status":"resolved","warnings":[]},"parsedData":{"title":"示例标题","author":"示例作者","shareUrl":"https://v.douyin.com/xxxxx/","audioReady":true}}
+
+event: reply_delta
+data: {"delta":"解析成功，标题是示例标题。"}
+
+event: done
+data: {"thinking":"...","reply":"解析成功，标题是示例标题。","sessionId":"f4df1d0b-cb2b-49ca-bfe3-7262d5e9ec67","toolStatus":{"status":"resolved","warnings":[]},"parsedData":{"title":"示例标题","author":"示例作者","shareUrl":"https://v.douyin.com/xxxxx/","audioReady":true}}
+```
+
+**兼容说明**:
+- 保留原有 `POST /api/ai/chat` 非流式接口，便于旧调用方继续使用
+- 推荐浏览器端使用 `fetch + ReadableStream` 消费流式响应，因为原生 `EventSource` 不支持 `POST` 请求体
+- 若模型侧暂未返回稳定的 token 流，服务端仍会保证 `session`、`progress`、`done` 等关键事件存在
+- `tool_result` 代表工具已经返回结构化对象，不直接等价于“链接业务有效”；请结合 `toolStatus` 判断是否需要提示用户二次确认
 
 ---
 
@@ -259,6 +331,14 @@ curl -X POST http://localhost:3000/api/parse \
 ```bash
 curl -X POST http://localhost:3000/api/ai/chat \
   -H "Content-Type: application/json" \
+  -d '{"message":"帮我解析这个抖音链接 https://v.douyin.com/xxxxx/"}'
+```
+
+**AI 流式对话解析**:
+```bash
+curl -N -X POST http://localhost:3000/api/ai/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
   -d '{"message":"帮我解析这个抖音链接 https://v.douyin.com/xxxxx/"}'
 ```
 

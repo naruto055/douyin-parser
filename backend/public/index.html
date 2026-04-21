@@ -229,9 +229,8 @@
       const sendButtonEl = document.getElementById('sendButton');
       const apiBaseHintEl = document.querySelector('.hint');
       const chatEndpoint = ChatApi.buildApiUrl('/api/ai/chat', window.location);
+      const streamEndpoint = ChatApi.buildApiUrl('/api/ai/chat/stream', window.location);
       const downloadEndpoint = ChatApi.buildApiUrl('/api/download', window.location);
-
-      const sessionId = localStorage.getItem('ai-session-id') || '';
 
       if (window.location.protocol === 'file:') {
         apiBaseHintEl.textContent = '当前页面通过 file:// 打开，请确保后端运行在 http://localhost:3000。AI 功能仍需要配置 LLM_API_KEY、LLM_BASE_URL、LLM_MODEL 等环境变量。';
@@ -272,6 +271,27 @@
         return createTextSection('最终回答', content, 'reply');
       }
 
+      function createAssistantMessageShell() {
+        const container = document.createElement('div');
+        container.className = 'assistant-message';
+
+        const thinkingBlock = createTextSection('思考过程', '', 'thinking');
+        const replyBlock = createTextSection('最终回答', '', 'reply');
+
+        thinkingBlock.hidden = true;
+        container.appendChild(thinkingBlock);
+        container.appendChild(replyBlock);
+        chatEl.prepend(container);
+
+        return {
+          container,
+          thinkingBlock,
+          thinkingContentEl: thinkingBlock.lastElementChild,
+          replyBlock,
+          replyContentEl: replyBlock.lastElementChild
+        };
+      }
+
       function renderAssistantMessage(data) {
         const container = document.createElement('div');
         container.className = 'assistant-message';
@@ -283,6 +303,26 @@
 
         container.appendChild(renderReplyBlock(data.reply));
         chatEl.prepend(container);
+      }
+
+      function appendAssistantDelta(shell, type, delta) {
+        if (!delta) {
+          return;
+        }
+
+        if (type === 'thinking') {
+          shell.thinkingBlock.hidden = false;
+          shell.thinkingContentEl.textContent += delta;
+          return;
+        }
+
+        shell.replyContentEl.textContent += delta;
+      }
+
+      function finalizeAssistantShell(shell, data) {
+        shell.thinkingBlock.hidden = !data.thinking;
+        shell.thinkingContentEl.textContent = data.thinking || '';
+        shell.replyContentEl.textContent = data.reply || '';
       }
 
       function createResultItem(label, value) {
@@ -300,8 +340,8 @@
         return item;
       }
 
-      function renderParsedData(parsedData) {
-        if (!parsedData) return;
+      function buildParsedDataCard(parsedData) {
+        if (!parsedData) return null;
 
         const card = document.createElement('div');
         card.className = 'result-card';
@@ -341,7 +381,127 @@
           card.appendChild(actions);
         }
 
-        chatEl.prepend(card);
+        return card;
+      }
+
+      function renderParsedData(parsedData, existingCard) {
+        const nextCard = buildParsedDataCard(parsedData);
+        if (!nextCard) {
+          return existingCard || null;
+        }
+
+        if (existingCard && existingCard.parentNode) {
+          existingCard.parentNode.replaceChild(nextCard, existingCard);
+        } else {
+          chatEl.prepend(nextCard);
+        }
+
+        return nextCard;
+      }
+
+      async function sendMessageByJson(message) {
+        const response = await fetch(chatEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message,
+            sessionId: localStorage.getItem('ai-session-id') || undefined
+          })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || '请求失败');
+        }
+
+        if (result.data.sessionId) {
+          localStorage.setItem('ai-session-id', result.data.sessionId);
+        }
+
+        renderAssistantMessage(result.data);
+        renderParsedData(result.data.parsedData);
+        statusEl.textContent = '解析完成。';
+      }
+
+      async function sendMessageByStream(message) {
+        const shell = createAssistantMessageShell();
+        let parsedDataCard = null;
+        let donePayload = null;
+
+        const response = await fetch(streamEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream'
+          },
+          body: JSON.stringify({
+            message,
+            sessionId: localStorage.getItem('ai-session-id') || undefined
+          })
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error('流式请求失败');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const blocks = buffer.split('\n\n');
+          buffer = blocks.pop() || '';
+
+          for (const block of blocks) {
+            const events = ChatApi.parseSSEChunk(`${block}\n\n`);
+            for (const event of events) {
+              if (event.event === 'session' && event.data.sessionId) {
+                localStorage.setItem('ai-session-id', event.data.sessionId);
+              }
+
+              if (event.event === 'progress' && event.data.message) {
+                statusEl.textContent = event.data.message;
+              }
+
+              if (event.event === 'thinking_delta') {
+                appendAssistantDelta(shell, 'thinking', event.data.delta || '');
+              }
+
+              if (event.event === 'reply_delta') {
+                appendAssistantDelta(shell, 'reply', event.data.delta || '');
+              }
+
+              if (event.event === 'tool_result' && event.data.parsedData) {
+                parsedDataCard = renderParsedData(event.data.parsedData, parsedDataCard);
+              }
+
+              if (event.event === 'error') {
+                throw new Error(event.data.error || 'AI 流式请求失败');
+              }
+
+              if (event.event === 'done') {
+                donePayload = event.data;
+              }
+            }
+          }
+        }
+
+        if (!donePayload) {
+          throw new Error('流式响应未正常结束');
+        }
+
+        finalizeAssistantShell(shell, donePayload);
+        parsedDataCard = renderParsedData(donePayload.parsedData, parsedDataCard);
+        statusEl.textContent = '解析完成。';
       }
 
       async function sendMessage() {
@@ -359,33 +519,15 @@
         renderBubble('user', message);
 
         try {
-          const response = await fetch(chatEndpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              message,
-              sessionId: localStorage.getItem('ai-session-id') || undefined
-            })
-          });
-
-          const result = await response.json();
-
-          if (!response.ok || !result.success) {
-            throw new Error(result.error || '请求失败');
-          }
-
-          if (result.data.sessionId) {
-            localStorage.setItem('ai-session-id', result.data.sessionId);
-          }
-
-          renderAssistantMessage(result.data);
-          renderParsedData(result.data.parsedData);
-          statusEl.textContent = '解析完成。';
+          await sendMessageByStream(message);
         } catch (error) {
-          statusEl.textContent = error.message || 'AI 请求失败';
-          statusEl.className = 'status error';
+          try {
+            statusEl.textContent = '流式通道失败，正在回退到普通请求...';
+            await sendMessageByJson(message);
+          } catch (fallbackError) {
+            statusEl.textContent = fallbackError.message || error.message || 'AI 请求失败';
+            statusEl.className = 'status error';
+          }
         } finally {
           sendButtonEl.disabled = false;
         }
