@@ -90,6 +90,49 @@ test('AIChatService 在模型未返回工具调用时走后端降级路径并拆
     assert.equal(result.thinking, '这是后端降级路径的思考');
     assert.equal(result.reply, '已根据解析结果为你整理完成。');
     assert.equal(result.parsedData.audioReady, false);
+    assert.equal(result.toolStatus.status, 'resolved');
+    assert.deepEqual(result.toolStatus.warnings, []);
+  } finally {
+    LLMClientFactory.create = originalCreate;
+    parseDouyinVideoTool.execute = originalExecute;
+  }
+});
+
+test('AIChatService 在占位短链场景下返回 suspect toolStatus', async () => {
+  const originalCreate = LLMClientFactory.create;
+  const originalExecute = parseDouyinVideoTool.execute;
+
+  let callCount = 0;
+  LLMClientFactory.create = () => ({
+    getName: () => 'openai-compatible',
+    generate: async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return {
+          content: '',
+          toolCalls: []
+        };
+      }
+
+      return {
+        content: '这是占位链接。',
+        toolCalls: []
+      };
+    }
+  });
+
+  parseDouyinVideoTool.execute = async () => ({
+    title: '占位示例',
+    author: '测试作者',
+    shareUrl: 'https://v.douyin.com/xxxxx/',
+    audioReady: false
+  });
+
+  try {
+    const result = await AIChatService.chat('请解析这个链接 https://v.douyin.com/xxxxx/', 'session-placeholder');
+
+    assert.equal(result.toolStatus.status, 'suspect');
+    assert.deepEqual(result.toolStatus.warnings, ['placeholder_share_url']);
   } finally {
     LLMClientFactory.create = originalCreate;
     parseDouyinVideoTool.execute = originalExecute;

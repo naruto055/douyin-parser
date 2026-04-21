@@ -40,6 +40,38 @@ class OpenAICompatibleProvider {
     }
   }
 
+  async *streamGenerate({ messages, tools = [], toolChoice = 'auto' }) {
+    try {
+      const stream = await this.client.chat.completions.create({
+        model: this.options.model,
+        messages,
+        tools: tools.length > 0 ? tools : undefined,
+        tool_choice: tools.length > 0 ? toolChoice : undefined,
+        temperature: this.options.temperature,
+        max_tokens: this.options.maxTokens,
+        stream: true
+      });
+
+      for await (const chunk of stream) {
+        const delta = chunk?.choices?.[0]?.delta;
+
+        if (!delta?.content) {
+          continue;
+        }
+
+        yield {
+          type: 'content_delta',
+          delta: this._normalizeContent(delta.content)
+        };
+      }
+    } catch (error) {
+      const wrappedError = new Error(error.message || 'LLM request failed');
+      wrappedError.statusCode = error.status || error.statusCode || 502;
+      wrappedError.cause = error;
+      throw wrappedError;
+    }
+  }
+
   _normalizeResponse(response) {
     const message = response?.choices?.[0]?.message || {};
 

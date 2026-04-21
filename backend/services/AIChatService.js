@@ -18,24 +18,13 @@ const SYSTEM_PROMPT = [
 
 class AIChatService {
   static async chat(message, sessionId) {
-    if (!config.ai.enabled) {
-      const error = new Error('AI chat is disabled');
-      error.statusCode = 403;
-      throw error;
-    }
-
-    if (!message || !String(message).trim()) {
-      const error = new Error('message is required');
-      error.statusCode = 400;
-      throw error;
-    }
+    this._assertChatRequest(message);
 
     const provider = LLMClientFactory.create();
-    const resolvedSessionId = sessionId || this._createSessionId();
-    const history = this._getSessionMessages(resolvedSessionId);
-    const userMessage = { role: 'user', content: String(message).trim() };
+    const { resolvedSessionId, history, userMessage } = this._createChatContext(message, sessionId);
 
     let parsedData = null;
+    let toolStatus = null;
     let thinking = '';
     let reply = '';
 
@@ -43,11 +32,7 @@ class AIChatService {
 
     try {
       const initialResponse = await provider.generate({
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          ...history,
-          userMessage
-        ],
+        messages: this._buildModelMessages(history, userMessage),
         tools: [parseDouyinVideoTool.definition]
       });
 
@@ -56,6 +41,7 @@ class AIChatService {
       if (initialResponse.toolCalls.length > 0) {
         const toolContext = await this._executeToolCalls(initialResponse.toolCalls);
         parsedData = toolContext.parsedData;
+        toolStatus = this._buildToolStatus(parsedData);
 
         const finalResponse = await provider.generate({
           messages: [
@@ -77,17 +63,10 @@ class AIChatService {
         if (extractedUrl) {
           console.log('[AI] fallback parsing path activated');
           parsedData = await parseDouyinVideoTool.execute({ url: extractedUrl });
+          toolStatus = this._buildToolStatus(parsedData);
 
           const fallbackResponse = await provider.generate({
-            messages: [
-              { role: 'system', content: SYSTEM_PROMPT },
-              ...history,
-              userMessage,
-              {
-                role: 'system',
-                content: `以下是工具 parse_douyin_video 的执行结果，请基于它回答用户：${JSON.stringify(parsedData)}`
-              }
-            ]
+            messages: this._buildFallbackMessages(history, userMessage, parsedData)
           });
 
           ({ thinking, reply } = this._normalizeAssistantReply(fallbackResponse.content, parsedData));
@@ -110,8 +89,167 @@ class AIChatService {
       thinking,
       reply,
       sessionId: resolvedSessionId,
-      parsedData
+      parsedData,
+      toolStatus
     };
+  }
+
+  static async chatStream(message, sessionId, { onEvent } = {}) {
+    this._assertChatRequest(message);
+
+    const provider = LLMClientFactory.create();
+    const { resolvedSessionId, history, userMessage } = this._createChatContext(message, sessionId);
+    const emit = typeof onEvent === 'function' ? onEvent : () => {};
+
+    let parsedData = null;
+    let toolStatus = null;
+    let content = '';
+    let thinking = '';
+    let reply = '';
+
+    console.log(`[AI] provider=${provider.getName()} model=${config.ai.model} session=${resolvedSessionId} stream=true`);
+
+    emit('session', { sessionId: resolvedSessionId });
+    emit('progress', { stage: 'model_start', message: 'AI 正在分析输入' });
+
+    try {
+      const extractedUrl = extractUrlFromText(userMessage.content);
+      if (extractedUrl) {
+        console.log('[AI] stream fallback parsing path activated');
+        parsedData = await parseDouyinVideoTool.execute({ url: extractedUrl });
+        toolStatus = this._buildToolStatus(parsedData);
+        emit('tool_result', { parsedData, toolStatus });
+      }
+
+      const messages = parsedData
+        ? this._buildFallbackMessages(history, userMessage, parsedData)
+        : this._buildModelMessages(history, userMessage);
+
+      for await (const chunk of provider.streamGenerate({
+        messages,
+        tools: parsedData ? [] : [parseDouyinVideoTool.definition]
+      })) {
+        if (chunk.type !== 'content_delta' || !chunk.delta) {
+          continue;
+        }
+
+        content += chunk.delta;
+
+        const normalized = this._splitStreamingAssistantReply(content);
+        const nextThinking = normalized.thinking;
+        const nextReply = normalized.reply;
+        const thinkingDelta = nextThinking.slice(thinking.length);
+        const replyDelta = nextReply.slice(reply.length);
+
+        if (thinkingDelta) {
+          thinking = nextThinking;
+          emit('thinking_delta', { delta: thinkingDelta });
+        }
+
+        if (replyDelta) {
+          const emittedReplyDelta = reply ? replyDelta : replyDelta.replace(/^\s+/, '');
+          reply = nextReply;
+
+          if (emittedReplyDelta) {
+            emit('reply_delta', { delta: emittedReplyDelta });
+          }
+        }
+      }
+    } catch (error) {
+      if (error.name === 'ZodError') {
+        const validationError = new Error('Invalid tool arguments');
+        validationError.statusCode = 400;
+        throw validationError;
+      }
+      throw error;
+    }
+
+    const normalizedResult = this._normalizeAssistantReply(content, parsedData);
+    thinking = normalizedResult.thinking;
+    reply = normalizedResult.reply;
+
+    this._saveSession(resolvedSessionId, userMessage, reply);
+
+    const result = {
+      thinking,
+      reply,
+      sessionId: resolvedSessionId,
+      parsedData,
+      toolStatus
+    };
+
+    emit('done', result);
+    return result;
+  }
+
+  static _assertChatRequest(message) {
+    if (!config.ai.enabled) {
+      const error = new Error('AI chat is disabled');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (!message || !String(message).trim()) {
+      const error = new Error('message is required');
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  static _createChatContext(message, sessionId) {
+    const resolvedSessionId = sessionId || this._createSessionId();
+    const history = this._getSessionMessages(resolvedSessionId);
+    const userMessage = { role: 'user', content: String(message).trim() };
+
+    return {
+      resolvedSessionId,
+      history,
+      userMessage
+    };
+  }
+
+  static _buildModelMessages(history, userMessage) {
+    return [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...history,
+      userMessage
+    ];
+  }
+
+  static _buildFallbackMessages(history, userMessage, parsedData) {
+    return [
+      ...this._buildModelMessages(history, userMessage),
+      {
+        role: 'system',
+        content: `以下是工具 parse_douyin_video 的执行结果，请基于它回答用户：${JSON.stringify(parsedData)}`
+      }
+    ];
+  }
+
+  static _buildToolStatus(parsedData) {
+    if (!parsedData) {
+      return null;
+    }
+
+    const warnings = [];
+    const shareUrl = String(parsedData.shareUrl || '').trim();
+
+    if (this._isPlaceholderShareUrl(shareUrl)) {
+      warnings.push('placeholder_share_url');
+    }
+
+    return {
+      status: warnings.length > 0 ? 'suspect' : 'resolved',
+      warnings
+    };
+  }
+
+  static _isPlaceholderShareUrl(url) {
+    if (!url) {
+      return false;
+    }
+
+    return /^https?:\/\/v\.douyin\.com\/x{5,}\/?$/i.test(url);
   }
 
   static _createSessionId() {
@@ -137,12 +275,105 @@ class AIChatService {
   }
 
   static _normalizeAssistantReply(content, parsedData) {
-    const { thinking, reply } = this._splitThinkingAndReply(content);
+    const sanitizedContent = this._stripVendorToolCallMarkup(content);
+    const { thinking, reply } = this._splitThinkingAndReply(sanitizedContent);
 
     return {
       thinking,
       reply: reply || this._buildFallbackReply(parsedData)
     };
+  }
+
+  static _splitStreamingAssistantReply(content) {
+    const normalizedContent = this._stripVendorToolCallMarkup(content, { allowPartialTail: true });
+    const openTag = '<think>';
+    const closeTag = '</think>';
+    const replyParts = [];
+    const thinkingParts = [];
+    let cursor = 0;
+
+    while (cursor < normalizedContent.length) {
+      const openIndex = normalizedContent.indexOf(openTag, cursor);
+      if (openIndex === -1) {
+        const tail = normalizedContent.slice(cursor);
+        const partialTagIndex = this._findPartialThinkTagIndex(tail);
+        replyParts.push(partialTagIndex === -1 ? tail : tail.slice(0, partialTagIndex));
+        break;
+      }
+
+      replyParts.push(normalizedContent.slice(cursor, openIndex));
+
+      const thinkStart = openIndex + openTag.length;
+      const closeIndex = normalizedContent.indexOf(closeTag, thinkStart);
+      if (closeIndex === -1) {
+        thinkingParts.push(normalizedContent.slice(thinkStart));
+        break;
+      }
+
+      thinkingParts.push(normalizedContent.slice(thinkStart, closeIndex));
+      cursor = closeIndex + closeTag.length;
+    }
+
+    return {
+      thinking: thinkingParts.join(''),
+      reply: replyParts.join('')
+    };
+  }
+
+  static _findPartialThinkTagIndex(content) {
+    const partialTokens = ['<think', '<thin', '<thi', '<th', '<t', '<'];
+
+    for (const token of partialTokens) {
+      if (content.endsWith(token)) {
+        return content.length - token.length;
+      }
+    }
+
+    return -1;
+  }
+
+  static _stripVendorToolCallMarkup(content, { allowPartialTail = false } = {}) {
+    const normalizedContent = typeof content === 'string' ? content : '';
+    const openTag = '<minimax:tool_call>';
+    const closeTag = '</minimax:tool_call>';
+    let sanitized = '';
+    let cursor = 0;
+
+    while (cursor < normalizedContent.length) {
+      const openIndex = normalizedContent.indexOf(openTag, cursor);
+      if (openIndex === -1) {
+        const tail = normalizedContent.slice(cursor);
+        if (allowPartialTail) {
+          const partialOpenIndex = this._findPartialTokenIndex(tail, openTag);
+          sanitized += partialOpenIndex === -1 ? tail : tail.slice(0, partialOpenIndex);
+        } else {
+          sanitized += tail;
+        }
+        break;
+      }
+
+      sanitized += normalizedContent.slice(cursor, openIndex);
+
+      const closeIndex = normalizedContent.indexOf(closeTag, openIndex + openTag.length);
+      if (closeIndex === -1) {
+        break;
+      }
+
+      cursor = closeIndex + closeTag.length;
+    }
+
+    return sanitized;
+  }
+
+  static _findPartialTokenIndex(content, token) {
+    for (let length = token.length - 1; length > 0; length -= 1) {
+      const partial = token.slice(0, length);
+      if (content.endsWith(partial)) {
+        return content.length - partial.length;
+      }
+    }
+
+    return -1;
   }
 
   static _splitThinkingAndReply(content) {
