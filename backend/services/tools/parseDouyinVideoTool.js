@@ -1,19 +1,18 @@
 const { z } = require('zod');
 
 const VideoService = require('../VideoService');
+const { createLangChainToolAdapter } = require('../../ai/infra/langchain/langChainToolAdapterFactory');
 
 /**
  * 抖音视频解析工具，供 LLM 通过 Tool Calling / Function Calling 机制间接调用。
  *
  * 工作流程：
- * 1. AIChatService 在构造模型请求时，将本文件导出的 `definition` 放入 `tools` 数组传给 LLM。
+ * 1. AI 运行时在构造 agent 时，将本文件导出的 LangChain tool 注册到模型可调用工具集中。
  * 2. 模型判断用户问题需要解析抖音链接时，会返回一个 `tool_call`，其中包含工具名 `parse_douyin_video`
  *    和结构化参数。
- * 3. OpenAICompatibleProvider 会把模型返回的 `tool_call` 归一化为 `toolCalls`，再交给
- *    AIChatService._executeToolCalls() 统一调度。
- * 4. AIChatService 根据工具名匹配到本文件，并调用 `execute(input)` 真正执行服务端逻辑。
- * 5. `execute(input)` 先使用 `inputSchema` 校验参数，再调用 VideoService.parseVideo() 获取解析结果。
- * 6. 工具执行结果会被包装成 `role: 'tool'` 的消息回填给模型，模型再基于真实结果生成最终回复。
+ * 3. Chat runtime 根据工具名匹配到本工具，并调用 `execute(input)` 真正执行服务端逻辑。
+ * 4. `execute(input)` 先使用 `inputSchema` 校验参数，再调用 VideoService.parseVideo() 获取解析结果。
+ * 5. 工具执行结果会被回填给模型，由模型基于真实结果生成最终回复。
  *
  * 使用约定：
  * - `definition`：给模型看的工具说明书，描述工具名称、用途和参数结构。
@@ -29,7 +28,7 @@ const VideoService = require('../VideoService');
 // 定义工具入参结构，确保调用方至少传入一个非空 URL 文本。
 const inputSchema = z.object({
   url: z.string().trim().min(1, 'URL is required')
-});
+}).strict();
 
 // 按 OpenAI Tool Calling 规范声明工具元信息，供模型识别可调用能力。
 const toolDefinition = {
@@ -71,9 +70,18 @@ async function execute(input) {
   };
 }
 
+// 基于现有 schema 与 execute 提供 LangChain 兼容对象，供统一 runtime 直接注册。
+const langChainTool = createLangChainToolAdapter({
+  name: toolDefinition.function.name,
+  description: toolDefinition.function.description,
+  inputSchema,
+  execute
+});
+
 module.exports = {
   name: toolDefinition.function.name,
   definition: toolDefinition,
   inputSchema,
-  execute
+  execute,
+  langChainTool
 };

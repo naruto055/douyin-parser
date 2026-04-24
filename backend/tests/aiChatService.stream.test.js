@@ -4,21 +4,45 @@ const assert = require('node:assert/strict');
 const AIChatService = require('../services/AIChatService');
 const LLMClientFactory = require('../services/llm/LLMClientFactory');
 const parseDouyinVideoTool = require('../services/tools/parseDouyinVideoTool');
+const StreamEventAdapter = require('../ai/runtime/streamEventAdapter');
+
+function createMockStreamProvider({ streamGenerate, generate }) {
+  return {
+    getName: () => 'openai-compatible',
+    streamGenerate: streamGenerate || (async function* () {}),
+    generate: generate || (async () => ({ content: '', toolCalls: [] }))
+  };
+}
 
 test('AIChatService.chatStream 输出 session、tool_result、done，并仅保存最终 reply', async () => {
   const originalCreate = LLMClientFactory.create;
   const originalExecute = parseDouyinVideoTool.execute;
 
-  LLMClientFactory.create = () => ({
-    getName: () => 'openai-compatible',
-    streamGenerate: async function* () {
-      yield { type: 'content_delta', delta: '<think>先执行工具</think>' };
-      yield { type: 'content_delta', delta: '解析完成。' };
+  LLMClientFactory.create = () => createMockStreamProvider({
+    async *streamGenerate() {
+      yield {
+        type: 'tool_call',
+        toolCall: {
+          id: 'tool-1',
+          type: 'function',
+          name: 'parse_douyin_video',
+          arguments: '{"url":"https://v.douyin.com/tool"}'
+        }
+      };
     },
-    generate: async () => ({
-      content: '继续回答',
-      toolCalls: []
-    })
+    async generate(input) {
+      if (input.messages.some((message) => message.role === 'tool')) {
+        return {
+          content: '<think>先执行工具</think>解析完成。',
+          toolCalls: []
+        };
+      }
+
+      return {
+        content: '继续对话回复',
+        toolCalls: []
+      };
+    }
   });
 
   parseDouyinVideoTool.execute = async () => ({
@@ -60,15 +84,24 @@ test('AIChatService.chatStream 在占位短链场景下将 tool_result 标记为
   const originalCreate = LLMClientFactory.create;
   const originalExecute = parseDouyinVideoTool.execute;
 
-  LLMClientFactory.create = () => ({
-    getName: () => 'openai-compatible',
-    streamGenerate: async function* () {
-      yield { type: 'content_delta', delta: '该链接看起来像占位符。' };
+  LLMClientFactory.create = () => createMockStreamProvider({
+    async *streamGenerate() {
+      yield {
+        type: 'tool_call',
+        toolCall: {
+          id: 'tool-placeholder',
+          type: 'function',
+          name: 'parse_douyin_video',
+          arguments: '{"url":"https://v.douyin.com/xxxxx/"}'
+        }
+      };
     },
-    generate: async () => ({
-      content: '继续回答',
-      toolCalls: []
-    })
+    async generate() {
+      return {
+        content: '该链接看起来像占位符。',
+        toolCalls: []
+      };
+    }
   });
 
   parseDouyinVideoTool.execute = async () => ({
@@ -102,17 +135,12 @@ test('AIChatService.chatStream 在占位短链场景下将 tool_result 标记为
 test('AIChatService.chatStream 在 think 标签未闭合时不应把思考片段发到 reply_delta', async () => {
   const originalCreate = LLMClientFactory.create;
 
-  LLMClientFactory.create = () => ({
-    getName: () => 'openai-compatible',
-    streamGenerate: async function* () {
+  LLMClientFactory.create = () => createMockStreamProvider({
+    async *streamGenerate() {
       yield { type: 'content_delta', delta: '<think>用户' };
       yield { type: 'content_delta', delta: '在提问' };
       yield { type: 'content_delta', delta: '</think>正式回答' };
-    },
-    generate: async () => ({
-      content: '继续回答',
-      toolCalls: []
-    })
+    }
   });
 
   const events = [];
@@ -145,18 +173,24 @@ test('AIChatService.chatStream 应过滤 Minimax 工具调用标记并在 reply 
   const originalCreate = LLMClientFactory.create;
   const originalExecute = parseDouyinVideoTool.execute;
 
-  LLMClientFactory.create = () => ({
-    getName: () => 'openai-compatible',
-    streamGenerate: async function* () {
-      yield { type: 'content_delta', delta: '<think>准备返回结果</think>' };
-      yield { type: 'content_delta', delta: '<minimax:tool_call>\n<invoke name="douyin_parse">' };
-      yield { type: 'content_delta', delta: '\n<parameter name="url">https://www.douyin.com/video/1</parameter>' };
-      yield { type: 'content_delta', delta: '\n</invoke>\n</minimax:tool_call>' };
+  LLMClientFactory.create = () => createMockStreamProvider({
+    async *streamGenerate() {
+      yield {
+        type: 'tool_call',
+        toolCall: {
+          id: 'tool-minimax',
+          type: 'function',
+          name: 'parse_douyin_video',
+          arguments: '{"url":"https://www.douyin.com/video/1"}'
+        }
+      };
     },
-    generate: async () => ({
-      content: '继续回答',
-      toolCalls: []
-    })
+    async generate() {
+      return {
+        content: '<think>准备返回结果</think><minimax:tool_call>\n<invoke name="douyin_parse">\n<parameter name="url">https://www.douyin.com/video/1</parameter>\n</invoke>\n</minimax:tool_call>',
+        toolCalls: []
+      };
+    }
   });
 
   parseDouyinVideoTool.execute = async () => ({
@@ -192,15 +226,10 @@ test('AIChatService.chatStream 应过滤 Minimax 工具调用标记并在 reply 
 test('AIChatService.chatStream 不应发送纯空白 reply_delta', async () => {
   const originalCreate = LLMClientFactory.create;
 
-  LLMClientFactory.create = () => ({
-    getName: () => 'openai-compatible',
-    streamGenerate: async function* () {
+  LLMClientFactory.create = () => createMockStreamProvider({
+    async *streamGenerate() {
       yield { type: 'content_delta', delta: '<think>先思考</think>\n\n\n正式回答' };
-    },
-    generate: async () => ({
-      content: '继续回答',
-      toolCalls: []
-    })
+    }
   });
 
   const events = [];
@@ -221,4 +250,131 @@ test('AIChatService.chatStream 不应发送纯空白 reply_delta', async () => {
   } finally {
     LLMClientFactory.create = originalCreate;
   }
+});
+
+test('AIChatService.chatStream 在 Phase 5 中不应依赖 _buildModelMessages 旧分支', async () => {
+  const originalCreate = LLMClientFactory.create;
+  const originalBuildModelMessages = AIChatService._buildModelMessages;
+
+  LLMClientFactory.create = () => createMockStreamProvider({
+    async *streamGenerate() {
+      yield { type: 'content_delta', delta: 'runtime 收敛成功' };
+    }
+  });
+
+  AIChatService._buildModelMessages = () => {
+    throw new Error('legacy _buildModelMessages should not be used in chatStream()');
+  };
+
+  try {
+    const result = await AIChatService.chatStream('你好', 'session-phase5-runtime');
+    assert.equal(result.reply, 'runtime 收敛成功');
+  } finally {
+    LLMClientFactory.create = originalCreate;
+    AIChatService._buildModelMessages = originalBuildModelMessages;
+  }
+});
+
+test('streamEventAdapter 应累计流式内容并按增量发出 thinking/reply 事件', () => {
+  const events = [];
+  const adapter = new StreamEventAdapter({
+    emit(event, payload) {
+      events.push({ event, payload });
+    }
+  });
+
+  adapter.consume({ type: 'content_delta', delta: '<think>用户' });
+  adapter.consume({ type: 'content_delta', delta: '在提问' });
+  adapter.consume({ type: 'content_delta', delta: '</think>正式回答' });
+
+  const result = adapter.finalize(null);
+  const replyDeltas = events
+    .filter((event) => event.event === 'reply_delta')
+    .map((event) => event.payload.delta);
+  const thinkingDeltas = events
+    .filter((event) => event.event === 'thinking_delta')
+    .map((event) => event.payload.delta);
+
+  assert.deepEqual(replyDeltas, ['正式回答']);
+  assert.equal(thinkingDeltas.join(''), '用户在提问');
+  assert.equal(result.thinking, '用户在提问');
+  assert.equal(result.reply, '正式回答');
+});
+
+test('streamEventAdapter 在多个 think 片段时 finalize 结果应与增量事件一致', () => {
+  const events = [];
+  const adapter = new StreamEventAdapter({
+    emit(event, payload) {
+      events.push({ event, payload });
+    }
+  });
+
+  adapter.consume({ type: 'content_delta', delta: '<think>第一段' });
+  adapter.consume({ type: 'content_delta', delta: '思考</think>前置回复' });
+  adapter.consume({ type: 'content_delta', delta: '<think>第二段思考</think>后置回复' });
+
+  const result = adapter.finalize(null);
+  const replyFromDelta = events
+    .filter((event) => event.event === 'reply_delta')
+    .map((event) => event.payload.delta)
+    .join('');
+  const thinkingFromDelta = events
+    .filter((event) => event.event === 'thinking_delta')
+    .map((event) => event.payload.delta)
+    .join('');
+
+  assert.equal(result.thinking, thinkingFromDelta);
+  assert.equal(result.reply, replyFromDelta);
+});
+
+test('streamEventAdapter 应将 runtime 事件映射为 progress/tool_result SSE 事件', () => {
+  const events = [];
+  const adapter = new StreamEventAdapter({
+    emit(event, payload) {
+      events.push({ event, payload });
+    },
+    buildToolStatus() {
+      return {
+        status: 'resolved',
+        warnings: []
+      };
+    }
+  });
+
+  const parsedData = {
+    title: '测试视频',
+    author: '测试作者',
+    shareUrl: 'https://v.douyin.com/tool',
+    audioReady: true
+  };
+
+  adapter.consume({
+    type: 'progress',
+    stage: 'model_start',
+    message: 'AI 正在分析输入'
+  });
+  adapter.consume({
+    type: 'tool_result',
+    parsedData
+  });
+
+  assert.deepEqual(events, [
+    {
+      event: 'progress',
+      payload: {
+        stage: 'model_start',
+        message: 'AI 正在分析输入'
+      }
+    },
+    {
+      event: 'tool_result',
+      payload: {
+        parsedData,
+        toolStatus: {
+          status: 'resolved',
+          warnings: []
+        }
+      }
+    }
+  ]);
 });

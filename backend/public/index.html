@@ -3,16 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>抖音解析 AI 助手</title>
+    <title>抖音解析 AI 联调控制台</title>
     <style>
       :root {
-        --bg: linear-gradient(160deg, #0f172a 0%, #111827 45%, #1f2937 100%);
+        --bg: radial-gradient(circle at top, #1f2937 0%, #0f172a 48%, #020617 100%);
         --panel: rgba(15, 23, 42, 0.78);
+        --panel-strong: rgba(15, 23, 42, 0.92);
         --panel-border: rgba(148, 163, 184, 0.18);
         --text: #e5eef9;
-        --muted: #a8b3c7;
-        --accent: #f97316;
-        --accent-2: #22c55e;
+        --muted: #93a4bc;
+        --accent: #fb923c;
+        --accent-2: #38bdf8;
+        --success: #22c55e;
+        --warning: #f59e0b;
         --danger: #f87171;
       }
 
@@ -29,9 +32,9 @@
       }
 
       .page {
-        width: min(980px, calc(100% - 32px));
+        width: min(1280px, calc(100% - 32px));
         margin: 0 auto;
-        padding: 40px 0 56px;
+        padding: 28px 0 44px;
       }
 
       .hero,
@@ -40,37 +43,149 @@
         backdrop-filter: blur(18px);
         border: 1px solid var(--panel-border);
         border-radius: 24px;
-        box-shadow: 0 18px 80px rgba(15, 23, 42, 0.32);
+        box-shadow: 0 18px 80px rgba(15, 23, 42, 0.34);
       }
 
       .hero {
         padding: 28px;
-        margin-bottom: 20px;
+        margin-bottom: 18px;
       }
 
       .hero h1 {
         margin: 0 0 10px;
-        font-size: clamp(28px, 6vw, 44px);
+        font-size: clamp(28px, 5vw, 42px);
       }
 
       .hero p {
         margin: 0;
+        line-height: 1.7;
         color: var(--muted);
-        line-height: 1.6;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(360px, 1.15fr) minmax(300px, 0.85fr);
+        gap: 18px;
+        align-items: start;
       }
 
       .panel {
-        padding: 24px;
+        padding: 22px;
       }
 
-      .composer {
+      .panel + .panel {
+        margin-top: 18px;
+      }
+
+      .panel-title {
+        margin: 0 0 14px;
+        font-size: 18px;
+      }
+
+      .subtle {
+        margin: 0 0 14px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .control-grid {
         display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .control-card,
+      .result-card,
+      .log-item,
+      .case-item,
+      .result-item {
+        padding: 14px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(148, 163, 184, 0.16);
+      }
+
+      .control-label,
+      .result-label {
+        display: block;
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+      }
+
+      .radio-row,
+      .switch-row,
+      .button-row,
+      .quick-cases {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .radio-pill,
+      .case-button,
+      .secondary-button,
+      .send-button {
+        border: none;
+        border-radius: 999px;
+        padding: 11px 18px;
+        color: white;
+        font: inherit;
+        cursor: pointer;
+        transition: transform 0.18s ease, opacity 0.18s ease;
+      }
+
+      .radio-pill {
+        background: rgba(148, 163, 184, 0.18);
+      }
+
+      .radio-pill.active {
+        background: linear-gradient(120deg, var(--accent-2), #34d399);
+      }
+
+      .case-button {
+        background: rgba(249, 115, 22, 0.18);
+        border: 1px solid rgba(249, 115, 22, 0.22);
+      }
+
+      .secondary-button {
+        background: rgba(148, 163, 184, 0.16);
+      }
+
+      .send-button {
+        background: linear-gradient(120deg, var(--accent), #fb7185);
+        font-weight: 600;
+      }
+
+      .radio-pill:hover,
+      .case-button:hover,
+      .secondary-button:hover,
+      .send-button:hover {
+        transform: translateY(-1px);
+      }
+
+      .radio-pill:disabled,
+      .case-button:disabled,
+      .secondary-button:disabled,
+      .send-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+        transform: none;
+      }
+
+      .switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text);
       }
 
       textarea {
         width: 100%;
-        min-height: 140px;
+        min-height: 150px;
         padding: 16px;
         border: 1px solid rgba(148, 163, 184, 0.22);
         border-radius: 18px;
@@ -78,27 +193,12 @@
         color: var(--text);
         resize: vertical;
         font: inherit;
+        line-height: 1.6;
       }
 
-      button {
-        border: none;
-        border-radius: 999px;
-        padding: 12px 22px;
-        background: linear-gradient(120deg, var(--accent), #fb7185);
-        color: white;
-        font: inherit;
-        font-weight: 600;
-        cursor: pointer;
-        justify-self: start;
-      }
-
-      button:disabled {
-        cursor: not-allowed;
-        opacity: 0.5;
-      }
-
-      .hint,
       .status {
+        min-height: 22px;
+        margin-top: 10px;
         color: var(--muted);
         font-size: 14px;
       }
@@ -107,26 +207,61 @@
         color: var(--danger);
       }
 
-      .chat {
+      .status.success {
+        color: var(--success);
+      }
+
+      .test-result {
+        border-left: 4px solid rgba(148, 163, 184, 0.4);
+      }
+
+      .test-result.pass {
+        border-left-color: var(--success);
+      }
+
+      .test-result.warn {
+        border-left-color: var(--warning);
+      }
+
+      .test-result.fail {
+        border-left-color: var(--danger);
+      }
+
+      .result-grid,
+      .check-grid {
         display: grid;
-        gap: 16px;
-        margin-top: 24px;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 10px;
+        margin-top: 12px;
       }
 
-      .bubble {
-        padding: 16px 18px;
-        border-radius: 20px;
-        line-height: 1.7;
+      .result-value {
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.6;
       }
 
-      .bubble.user {
-        background: rgba(249, 115, 22, 0.16);
-        border: 1px solid rgba(249, 115, 22, 0.22);
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
       }
 
-      .bubble.assistant {
-        background: rgba(34, 197, 94, 0.12);
-        border: 1px solid rgba(34, 197, 94, 0.22);
+      .badge.pass {
+        background: rgba(34, 197, 94, 0.16);
+        color: #9ae6b4;
+      }
+
+      .badge.warn {
+        background: rgba(245, 158, 11, 0.16);
+        color: #fcd34d;
+      }
+
+      .badge.fail {
+        background: rgba(248, 113, 113, 0.16);
+        color: #fca5a5;
       }
 
       .assistant-message {
@@ -134,12 +269,18 @@
         gap: 12px;
       }
 
+      .bubble,
       .assistant-section {
         padding: 16px 18px;
         border-radius: 20px;
         line-height: 1.7;
         white-space: pre-wrap;
         word-break: break-word;
+      }
+
+      .bubble.user {
+        background: rgba(249, 115, 22, 0.16);
+        border: 1px solid rgba(249, 115, 22, 0.22);
       }
 
       .assistant-section.thinking {
@@ -152,7 +293,8 @@
         border: 1px solid rgba(34, 197, 94, 0.22);
       }
 
-      .assistant-section-title {
+      .assistant-section-title,
+      .log-type {
         display: block;
         margin-bottom: 8px;
         color: var(--muted);
@@ -160,80 +302,272 @@
         letter-spacing: 0.04em;
       }
 
-      .result-card {
-        margin-top: 16px;
-        padding: 18px;
-        border-radius: 20px;
-        background: rgba(15, 23, 42, 0.68);
-        border: 1px solid rgba(148, 163, 184, 0.18);
-      }
-
-      .result-grid {
+      .stack {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 12px;
-        margin-top: 14px;
+        gap: 14px;
       }
 
-      .result-item {
-        padding: 12px;
+      .json-view,
+      .log-payload {
+        margin: 0;
+        padding: 14px;
         border-radius: 16px;
-        background: rgba(255, 255, 255, 0.04);
+        background: var(--panel-strong);
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        color: #cbd5e1;
+        overflow: auto;
+        font-size: 13px;
+        line-height: 1.6;
       }
 
-      .result-item strong {
-        display: block;
+      .log-list,
+      .chat {
+        display: grid;
+        gap: 12px;
+      }
+
+      .log-item {
+        background: rgba(15, 23, 42, 0.62);
+      }
+
+      .log-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
         margin-bottom: 8px;
       }
 
-      .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin-top: 16px;
+      .log-summary {
+        line-height: 1.6;
       }
 
-      .actions a {
-        text-decoration: none;
-        color: white;
-        border-radius: 999px;
-        padding: 10px 18px;
-        background: linear-gradient(120deg, #0ea5e9, #22c55e);
+      .hint {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 1024px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
     <main class="page">
       <section class="hero">
-        <h1>抖音解析 AI 助手</h1>
-        <p>输入抖音分享链接或分享文案，AI 会自动调用解析服务并给出结果说明。当前页面是仓库内置的最小静态入口，便于联调与演示。</p>
+        <h1>抖音解析 AI 联调控制台</h1>
+        <p>
+          这个页面用于手工验证普通 AI 对话、LangChain function calling、流式事件链路和最终解析结果。
+          它是联调工具，不是正式前端。
+        </p>
       </section>
 
-      <section class="panel">
-        <div class="composer">
-          <textarea id="message" placeholder="例如：帮我解析这个抖音链接 https://v.douyin.com/xxxxx/"></textarea>
-          <button id="sendButton" type="button">发送并解析</button>
-          <div class="hint">AI 功能需要在后端配置 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 等环境变量。</div>
-          <div id="status" class="status"></div>
-        </div>
+      <div class="layout">
+        <section>
+          <section class="panel">
+            <h2 class="panel-title">请求控制</h2>
+            <div class="control-grid">
+              <div class="control-card">
+                <span class="control-label">接口模式</span>
+                <div class="radio-row">
+                  <button id="streamModeButton" class="radio-pill active" type="button">流式 SSE</button>
+                  <button id="jsonModeButton" class="radio-pill" type="button">普通 JSON</button>
+                </div>
+              </div>
 
-        <div id="chat" class="chat"></div>
-      </section>
+              <div class="control-card">
+                <span class="control-label">测试目标</span>
+                <div class="radio-row">
+                  <button id="chatGoalButton" class="radio-pill active" type="button">普通对话</button>
+                  <button id="toolGoalButton" class="radio-pill" type="button">函数调用</button>
+                </div>
+              </div>
+
+              <div class="control-card">
+                <span class="control-label">会话控制</span>
+                <label class="switch">
+                  <input id="keepSessionToggle" type="checkbox" checked />
+                  保留 sessionId
+                </label>
+              </div>
+            </div>
+
+            <div class="button-row" style="margin-bottom: 14px;">
+              <button id="clearSessionButton" class="secondary-button" type="button">清空会话</button>
+              <button id="clearLogsButton" class="secondary-button" type="button">清空日志</button>
+              <button id="clearChatButton" class="secondary-button" type="button">清空对话</button>
+            </div>
+
+            <p id="apiHint" class="hint">
+              AI 功能需要在后端配置 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 等环境变量。
+            </p>
+          </section>
+
+          <section class="panel">
+            <h2 class="panel-title">测试用例</h2>
+            <p class="subtle">点击即可回填输入框，也可以直接发送。工具测试建议使用真实或可解析的抖音分享链接。</p>
+            <div id="quickCases" class="quick-cases"></div>
+          </section>
+
+          <section class="panel">
+            <h2 class="panel-title">发送请求</h2>
+            <textarea id="message" placeholder="例如：帮我解析这个抖音链接 https://v.douyin.com/xxxxx/"></textarea>
+            <div class="button-row" style="margin-top: 12px;">
+              <button id="sendButton" class="send-button" type="button">发送请求</button>
+              <button id="fillToolCaseButton" class="secondary-button" type="button">填入函数调用用例</button>
+              <button id="fillChatCaseButton" class="secondary-button" type="button">填入普通对话用例</button>
+            </div>
+            <div id="status" class="status"></div>
+          </section>
+
+          <section class="panel">
+            <h2 class="panel-title">对话输出</h2>
+            <div id="chat" class="chat"></div>
+          </section>
+        </section>
+
+        <aside>
+          <section class="panel">
+            <h2 class="panel-title">自动判定</h2>
+            <div id="testResultCard" class="result-card test-result">
+              <span class="result-label">本次测试结果</span>
+              <div id="testResultSummary" class="result-value">尚未发起测试。</div>
+              <div id="testResultChecks" class="check-grid"></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2 class="panel-title">工具调用诊断</h2>
+            <div class="stack">
+              <div class="result-card">
+                <span class="result-label">诊断摘要</span>
+                <div id="toolSummary" class="result-value">尚未收到工具调用结果。</div>
+              </div>
+              <div class="result-grid">
+                <div class="result-item">
+                  <span class="result-label">是否触发工具</span>
+                  <div id="toolTriggeredValue" class="result-value">否</div>
+                </div>
+                <div class="result-item">
+                  <span class="result-label">toolStatus</span>
+                  <div id="toolStatusValue" class="result-value">无</div>
+                </div>
+                <div class="result-item">
+                  <span class="result-label">warnings</span>
+                  <div id="toolWarningsValue" class="result-value">无</div>
+                </div>
+              </div>
+              <div>
+                <span class="result-label">parsedData 原始 JSON</span>
+                <pre id="parsedDataJson" class="json-view">{}</pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2 class="panel-title">事件日志</h2>
+            <div id="logList" class="log-list"></div>
+          </section>
+        </aside>
+      </div>
     </main>
 
     <script src="./chatApi.js"></script>
+    <script src="./chatDiagnostics.js"></script>
     <script>
+      const QUICK_CASES = [
+        {
+          label: '普通对话',
+          goal: 'chat',
+          message: '你好，请介绍一下你能做什么，并用两句话回答。'
+        },
+        {
+          label: '函数调用',
+          goal: 'tool',
+          message: '帮我解析这个抖音链接 https://v.douyin.com/xxxxx/ ，并告诉我标题、作者和下载建议。'
+        },
+        {
+          label: '分享文案',
+          goal: 'tool',
+          message: '我只有一段抖音分享文案，你先判断是否需要调用解析工具，再告诉我下一步。'
+        }
+      ];
+
       const messageEl = document.getElementById('message');
       const chatEl = document.getElementById('chat');
       const statusEl = document.getElementById('status');
       const sendButtonEl = document.getElementById('sendButton');
-      const apiBaseHintEl = document.querySelector('.hint');
+      const apiHintEl = document.getElementById('apiHint');
+      const logListEl = document.getElementById('logList');
+      const quickCasesEl = document.getElementById('quickCases');
+      const keepSessionToggleEl = document.getElementById('keepSessionToggle');
+      const streamModeButtonEl = document.getElementById('streamModeButton');
+      const jsonModeButtonEl = document.getElementById('jsonModeButton');
+      const chatGoalButtonEl = document.getElementById('chatGoalButton');
+      const toolGoalButtonEl = document.getElementById('toolGoalButton');
+      const testResultCardEl = document.getElementById('testResultCard');
+      const testResultSummaryEl = document.getElementById('testResultSummary');
+      const testResultChecksEl = document.getElementById('testResultChecks');
+      const toolSummaryEl = document.getElementById('toolSummary');
+      const toolTriggeredValueEl = document.getElementById('toolTriggeredValue');
+      const toolStatusValueEl = document.getElementById('toolStatusValue');
+      const toolWarningsValueEl = document.getElementById('toolWarningsValue');
+      const parsedDataJsonEl = document.getElementById('parsedDataJson');
+      const fillToolCaseButtonEl = document.getElementById('fillToolCaseButton');
+      const fillChatCaseButtonEl = document.getElementById('fillChatCaseButton');
+      const clearSessionButtonEl = document.getElementById('clearSessionButton');
+      const clearLogsButtonEl = document.getElementById('clearLogsButton');
+      const clearChatButtonEl = document.getElementById('clearChatButton');
+
       const chatEndpoint = ChatApi.buildApiUrl('/api/ai/chat', window.location);
       const streamEndpoint = ChatApi.buildApiUrl('/api/ai/chat/stream', window.location);
-      const downloadEndpoint = ChatApi.buildApiUrl('/api/download', window.location);
+
+      const state = {
+        requestMode: 'stream',
+        goalMode: 'chat',
+        runEvents: [],
+        lastToolPayload: null
+      };
 
       if (window.location.protocol === 'file:') {
-        apiBaseHintEl.textContent = '当前页面通过 file:// 打开，请确保后端运行在 http://localhost:3000。AI 功能仍需要配置 LLM_API_KEY、LLM_BASE_URL、LLM_MODEL 等环境变量。';
+        apiHintEl.textContent = '当前页面通过 file:// 打开，请确保后端运行在 http://localhost:3000。AI 功能仍需要配置 LLM_API_KEY、LLM_BASE_URL、LLM_MODEL 等环境变量。';
+      }
+
+      function updateToggleButtons() {
+        streamModeButtonEl.classList.toggle('active', state.requestMode === 'stream');
+        jsonModeButtonEl.classList.toggle('active', state.requestMode === 'json');
+        chatGoalButtonEl.classList.toggle('active', state.goalMode === 'chat');
+        toolGoalButtonEl.classList.toggle('active', state.goalMode === 'tool');
+      }
+
+      function getSessionId() {
+        if (!keepSessionToggleEl.checked) {
+          return undefined;
+        }
+
+        return localStorage.getItem('ai-session-id') || undefined;
+      }
+
+      function storeSessionId(sessionId) {
+        if (!sessionId) {
+          return;
+        }
+
+        if (!keepSessionToggleEl.checked) {
+          return;
+        }
+
+        localStorage.setItem('ai-session-id', sessionId);
+      }
+
+      function clearSession() {
+        localStorage.removeItem('ai-session-id');
+      }
+
+      function setStatus(message, type) {
+        statusEl.textContent = message || '';
+        statusEl.className = `status${type ? ` ${type}` : ''}`;
       }
 
       function createTextSection(title, content, className) {
@@ -259,18 +593,6 @@
         chatEl.prepend(bubble);
       }
 
-      function renderThinkingBlock(content) {
-        if (!content) {
-          return null;
-        }
-
-        return createTextSection('思考过程', content, 'thinking');
-      }
-
-      function renderReplyBlock(content) {
-        return createTextSection('最终回答', content, 'reply');
-      }
-
       function createAssistantMessageShell() {
         const container = document.createElement('div');
         container.className = 'assistant-message';
@@ -290,19 +612,6 @@
           replyBlock,
           replyContentEl: replyBlock.lastElementChild
         };
-      }
-
-      function renderAssistantMessage(data) {
-        const container = document.createElement('div');
-        container.className = 'assistant-message';
-
-        const thinkingBlock = renderThinkingBlock(data.thinking);
-        if (thinkingBlock) {
-          container.appendChild(thinkingBlock);
-        }
-
-        container.appendChild(renderReplyBlock(data.reply));
-        chatEl.prepend(container);
       }
 
       function appendAssistantDelta(shell, type, delta) {
@@ -325,78 +634,143 @@
         shell.replyContentEl.textContent = data.reply || '';
       }
 
-      function createResultItem(label, value) {
+      function renderAssistantMessage(data) {
+        const container = document.createElement('div');
+        container.className = 'assistant-message';
+
+        if (data.thinking) {
+          container.appendChild(createTextSection('思考过程', data.thinking, 'thinking'));
+        }
+
+        container.appendChild(createTextSection('最终回答', data.reply || '', 'reply'));
+        chatEl.prepend(container);
+      }
+
+      function safeJson(value) {
+        return JSON.stringify(value || {}, null, 2);
+      }
+
+      function renderToolDiagnostics(payload) {
+        state.lastToolPayload = payload || null;
+        const parsedData = payload?.parsedData || null;
+        const toolStatus = payload?.toolStatus || null;
+        const warnings = Array.isArray(toolStatus?.warnings) ? toolStatus.warnings : [];
+
+        toolTriggeredValueEl.textContent = parsedData ? '是' : '否';
+        toolStatusValueEl.textContent = toolStatus?.status || '无';
+        toolWarningsValueEl.textContent = warnings.length > 0 ? warnings.join(', ') : '无';
+        parsedDataJsonEl.textContent = safeJson(parsedData);
+        toolSummaryEl.textContent = parsedData
+          ? `已收到工具结果，标题：${parsedData.title || '未知'}`
+          : '尚未收到工具调用结果。';
+      }
+
+      function renderChecks(summary) {
+        testResultChecksEl.innerHTML = '';
+        const entries = Object.values(summary.checks || {});
+
+        entries.forEach((item) => {
+          const card = document.createElement('div');
+          card.className = 'result-item';
+
+          const label = document.createElement('span');
+          label.className = 'result-label';
+          label.textContent = item.label;
+
+          const badge = document.createElement('span');
+          badge.className = `badge ${item.passed ? 'pass' : 'fail'}`;
+          badge.textContent = item.passed ? '通过' : '失败';
+
+          const detail = document.createElement('div');
+          detail.className = 'result-value';
+          detail.textContent = item.detail;
+
+          card.appendChild(label);
+          card.appendChild(badge);
+          card.appendChild(detail);
+          testResultChecksEl.appendChild(card);
+        });
+      }
+
+      function renderTestResult(summary) {
+        testResultCardEl.className = `result-card test-result ${summary.status}`;
+        testResultSummaryEl.textContent = summary.summary;
+        renderChecks(summary);
+      }
+
+      function addRunEvent(event, data) {
+        const normalizedData = data && typeof data === 'object' ? data : {};
+        state.runEvents.push({ event, data: normalizedData });
+
+        const logEntry = ChatDiagnostics.buildEventLogEntry(event, normalizedData, new Date());
         const item = document.createElement('div');
-        item.className = 'result-item';
+        item.className = 'log-item';
 
-        const labelEl = document.createElement('strong');
-        labelEl.textContent = label;
+        const head = document.createElement('div');
+        head.className = 'log-head';
 
-        const valueEl = document.createElement('div');
-        valueEl.textContent = value;
+        const typeEl = document.createElement('strong');
+        typeEl.className = 'log-type';
+        typeEl.textContent = logEntry.type;
 
-        item.appendChild(labelEl);
-        item.appendChild(valueEl);
-        return item;
+        const timeEl = document.createElement('span');
+        timeEl.className = 'hint';
+        timeEl.textContent = logEntry.timestamp;
+
+        head.appendChild(typeEl);
+        head.appendChild(timeEl);
+
+        const summaryEl = document.createElement('div');
+        summaryEl.className = 'log-summary';
+        summaryEl.textContent = logEntry.summary;
+
+        const payloadEl = document.createElement('pre');
+        payloadEl.className = 'log-payload';
+        payloadEl.textContent = safeJson(logEntry.payload);
+
+        item.prepend(payloadEl);
+        item.prepend(summaryEl);
+        item.prepend(head);
+        logListEl.prepend(item);
+
+        if (event === 'tool_result') {
+          renderToolDiagnostics(normalizedData);
+        }
       }
 
-      function buildParsedDataCard(parsedData) {
-        if (!parsedData) return null;
-
-        const card = document.createElement('div');
-        card.className = 'result-card';
-
-        const titleEl = document.createElement('strong');
-        titleEl.textContent = '解析结果';
-        card.appendChild(titleEl);
-
-        const grid = document.createElement('div');
-        grid.className = 'result-grid';
-
-        const durationSeconds = parsedData.duration ? Math.round(parsedData.duration / 1000) : 0;
-        grid.appendChild(createResultItem('标题', parsedData.title || '未知'));
-        grid.appendChild(createResultItem('作者', parsedData.author || '未知'));
-        grid.appendChild(createResultItem('时长', durationSeconds ? `${durationSeconds} 秒` : '未知'));
-        grid.appendChild(createResultItem('音频直链', parsedData.audioReady ? '可直接获取' : '暂无直链'));
-        card.appendChild(grid);
-
-        const actions = document.createElement('div');
-        actions.className = 'actions';
-
-        if (parsedData.shareUrl) {
-          const videoLink = document.createElement('a');
-          videoLink.href = `${downloadEndpoint}?type=video&url=${encodeURIComponent(parsedData.shareUrl)}&title=${encodeURIComponent(parsedData.title || 'douyin_video')}`;
-          videoLink.textContent = '下载视频';
-          actions.appendChild(videoLink);
-        }
-
-        if (parsedData.shareUrl) {
-          const audioLink = document.createElement('a');
-          audioLink.href = `${downloadEndpoint}?type=audio&url=${encodeURIComponent(parsedData.shareUrl)}&title=${encodeURIComponent(parsedData.title || 'douyin_audio')}`;
-          audioLink.textContent = '下载音频';
-          actions.appendChild(audioLink);
-        }
-
-        if (actions.children.length > 0) {
-          card.appendChild(actions);
-        }
-
-        return card;
+      function resetRunState() {
+        state.runEvents = [];
+        state.lastToolPayload = null;
+        renderToolDiagnostics(null);
+        renderTestResult({
+          status: '',
+          summary: '本次请求尚未结束，等待后端事件返回。',
+          checks: {}
+        });
       }
 
-      function renderParsedData(parsedData, existingCard) {
-        const nextCard = buildParsedDataCard(parsedData);
-        if (!nextCard) {
-          return existingCard || null;
-        }
+      function finalizeRun() {
+        const summary = ChatDiagnostics.summarizeRunResult({
+          expectedMode: state.goalMode,
+          events: state.runEvents
+        });
+        renderTestResult(summary);
+      }
 
-        if (existingCard && existingCard.parentNode) {
-          existingCard.parentNode.replaceChild(nextCard, existingCard);
-        } else {
-          chatEl.prepend(nextCard);
-        }
-
-        return nextCard;
+      function renderQuickCases() {
+        QUICK_CASES.forEach((testCase) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'case-button';
+          button.textContent = testCase.label;
+          button.addEventListener('click', () => {
+            state.goalMode = testCase.goal;
+            updateToggleButtons();
+            messageEl.value = testCase.message;
+            setStatus(`已填入 ${testCase.label} 用例。`, '');
+          });
+          quickCasesEl.appendChild(button);
+        });
       }
 
       async function sendMessageByJson(message) {
@@ -407,28 +781,36 @@
           },
           body: JSON.stringify({
             message,
-            sessionId: localStorage.getItem('ai-session-id') || undefined
+            sessionId: getSessionId()
           })
         });
 
         const result = await response.json();
 
         if (!response.ok || !result.success) {
-          throw new Error(result.error || '请求失败');
+          const errorMessage = result.error || '请求失败';
+          addRunEvent('error', { error: errorMessage });
+          throw new Error(errorMessage);
         }
 
-        if (result.data.sessionId) {
-          localStorage.setItem('ai-session-id', result.data.sessionId);
+        const payload = result.data || {};
+        storeSessionId(payload.sessionId);
+        addRunEvent('session', { sessionId: payload.sessionId || 'unknown' });
+
+        if (payload.parsedData || payload.toolStatus) {
+          addRunEvent('tool_result', {
+            parsedData: payload.parsedData || null,
+            toolStatus: payload.toolStatus || null
+          });
         }
 
-        renderAssistantMessage(result.data);
-        renderParsedData(result.data.parsedData);
-        statusEl.textContent = '解析完成。';
+        addRunEvent('done', payload);
+        renderAssistantMessage(payload);
+        finalizeRun();
       }
 
       async function sendMessageByStream(message) {
         const shell = createAssistantMessageShell();
-        let parsedDataCard = null;
         let donePayload = null;
 
         const response = await fetch(streamEndpoint, {
@@ -439,11 +821,12 @@
           },
           body: JSON.stringify({
             message,
-            sessionId: localStorage.getItem('ai-session-id') || undefined
+            sessionId: getSessionId()
           })
         });
 
         if (!response.ok || !response.body) {
+          addRunEvent('error', { error: '流式请求失败' });
           throw new Error('流式请求失败');
         }
 
@@ -464,12 +847,14 @@
           for (const block of blocks) {
             const events = ChatApi.parseSSEChunk(`${block}\n\n`);
             for (const event of events) {
+              addRunEvent(event.event, event.data);
+
               if (event.event === 'session' && event.data.sessionId) {
-                localStorage.setItem('ai-session-id', event.data.sessionId);
+                storeSessionId(event.data.sessionId);
               }
 
               if (event.event === 'progress' && event.data.message) {
-                statusEl.textContent = event.data.message;
+                setStatus(event.data.message, '');
               }
 
               if (event.event === 'thinking_delta') {
@@ -478,10 +863,6 @@
 
               if (event.event === 'reply_delta') {
                 appendAssistantDelta(shell, 'reply', event.data.delta || '');
-              }
-
-              if (event.event === 'tool_result' && event.data.parsedData) {
-                parsedDataCard = renderParsedData(event.data.parsedData, parsedDataCard);
               }
 
               if (event.event === 'error') {
@@ -496,44 +877,111 @@
         }
 
         if (!donePayload) {
+          addRunEvent('error', { error: '流式响应未正常结束' });
           throw new Error('流式响应未正常结束');
         }
 
         finalizeAssistantShell(shell, donePayload);
-        parsedDataCard = renderParsedData(donePayload.parsedData, parsedDataCard);
-        statusEl.textContent = '解析完成。';
+        finalizeRun();
       }
 
       async function sendMessage() {
         const message = messageEl.value.trim();
         if (!message) {
-          statusEl.textContent = '请输入消息或抖音链接。';
-          statusEl.className = 'status error';
+          setStatus('请输入消息或抖音链接。', 'error');
           return;
         }
 
-        sendButtonEl.disabled = true;
-        statusEl.textContent = 'AI 正在解析，请稍候...';
-        statusEl.className = 'status';
+        if (!keepSessionToggleEl.checked) {
+          clearSession();
+        }
 
+        resetRunState();
         renderBubble('user', message);
+        setStatus(`正在通过 ${state.requestMode === 'stream' ? '流式 SSE' : '普通 JSON'} 模式发起请求...`, '');
+        sendButtonEl.disabled = true;
 
         try {
-          await sendMessageByStream(message);
-        } catch (error) {
-          try {
-            statusEl.textContent = '流式通道失败，正在回退到普通请求...';
+          if (state.requestMode === 'stream') {
+            await sendMessageByStream(message);
+          } else {
             await sendMessageByJson(message);
-          } catch (fallbackError) {
-            statusEl.textContent = fallbackError.message || error.message || 'AI 请求失败';
-            statusEl.className = 'status error';
           }
+
+          setStatus('请求完成，已生成测试判定。', 'success');
+        } catch (error) {
+          finalizeRun();
+          setStatus(error.message || 'AI 请求失败', 'error');
         } finally {
           sendButtonEl.disabled = false;
         }
       }
 
+      streamModeButtonEl.addEventListener('click', () => {
+        state.requestMode = 'stream';
+        updateToggleButtons();
+      });
+
+      jsonModeButtonEl.addEventListener('click', () => {
+        state.requestMode = 'json';
+        updateToggleButtons();
+      });
+
+      chatGoalButtonEl.addEventListener('click', () => {
+        state.goalMode = 'chat';
+        updateToggleButtons();
+      });
+
+      toolGoalButtonEl.addEventListener('click', () => {
+        state.goalMode = 'tool';
+        updateToggleButtons();
+      });
+
+      fillToolCaseButtonEl.addEventListener('click', () => {
+        const toolCase = QUICK_CASES.find((item) => item.goal === 'tool');
+        state.goalMode = 'tool';
+        updateToggleButtons();
+        messageEl.value = toolCase ? toolCase.message : '';
+      });
+
+      fillChatCaseButtonEl.addEventListener('click', () => {
+        const chatCase = QUICK_CASES.find((item) => item.goal === 'chat');
+        state.goalMode = 'chat';
+        updateToggleButtons();
+        messageEl.value = chatCase ? chatCase.message : '';
+      });
+
+      clearSessionButtonEl.addEventListener('click', () => {
+        clearSession();
+        setStatus('已清空本地 sessionId。', '');
+      });
+
+      clearLogsButtonEl.addEventListener('click', () => {
+        state.runEvents = [];
+        logListEl.innerHTML = '';
+        renderToolDiagnostics(null);
+        renderTestResult({
+          status: '',
+          summary: '日志已清空，等待下一次请求。',
+          checks: {}
+        });
+      });
+
+      clearChatButtonEl.addEventListener('click', () => {
+        chatEl.innerHTML = '';
+        setStatus('已清空对话区。', '');
+      });
+
       sendButtonEl.addEventListener('click', sendMessage);
+
+      renderQuickCases();
+      renderToolDiagnostics(null);
+      renderTestResult({
+        status: '',
+        summary: '请选择测试目标并发送请求。',
+        checks: {}
+      });
+      updateToggleButtons();
     </script>
   </body>
 </html>
