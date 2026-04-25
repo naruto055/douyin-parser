@@ -6,7 +6,11 @@
 
 **基础地址**: `http://localhost:3000`
 
-**内容类型**: `application/json`
+**内容类型**:
+
+- 普通接口默认返回 `application/json`
+- 下载接口成功时返回文件流
+- SSE 流式接口返回 `text/event-stream`
 
 ---
 
@@ -16,6 +20,7 @@
 
 - 普通解析接口：每分钟 20 次请求
 - AI 对话接口 `POST /api/ai/chat`、`POST /api/ai/chat/stream`：每分钟 10 次请求
+- 健康检查接口 `GET /api/health` 不走普通 `/api` 限流
 - 超出限制返回：429 Too Many Requests
 
 ### 统一响应格式
@@ -183,6 +188,24 @@ GET /api/download?type=audio&url=https://v.douyin.com/xxxxx/
 {
   "code": 400,
   "message": "type and url are required",
+  "data": null
+}
+```
+
+**其他常见错误**:
+
+```json
+{
+  "code": 400,
+  "message": "Invalid URL type. Please provide a Douyin video page URL, not a direct media file URL.",
+  "data": null
+}
+```
+
+```json
+{
+  "code": 400,
+  "message": "Invalid type. Must be \"audio\" or \"video\"",
   "data": null
 }
 ```
