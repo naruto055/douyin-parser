@@ -1,6 +1,8 @@
 const fs = require('fs');
 
 const audioExtractor = require('../utils/audioExtractor');
+const AppError = require('../errors/AppError');
+const ErrorCodes = require('../errors/errorCodes');
 const { sanitizeFilename } = require('../utils/stringUtil');
 const { streamFromUrl } = require('../utils/streamUtil');
 const VideoService = require('./VideoService');
@@ -11,9 +13,10 @@ class DownloadService {
     const downloadUrl = parsedData.videoUrl;
 
     if (!downloadUrl) {
-      const error = new Error('No video URL available');
-      error.statusCode = 400;
-      throw error;
+      throw new AppError({
+        code: ErrorCodes.DOWNLOAD_RESOURCE_MISSING,
+        message: 'No video URL available'
+      });
     }
 
     console.log('Streaming video from:', downloadUrl);
@@ -30,9 +33,10 @@ class DownloadService {
     }
 
     if (!parsedData.videoUrl) {
-      const error = new Error('No audio or video URL available');
-      error.statusCode = 400;
-      throw error;
+      throw new AppError({
+        code: ErrorCodes.DOWNLOAD_RESOURCE_MISSING,
+        message: 'No audio or video URL available'
+      });
     }
 
     console.log('Extracting audio from video...');

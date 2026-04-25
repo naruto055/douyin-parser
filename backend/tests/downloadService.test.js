@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const DownloadService = require('../services/DownloadService');
 const VideoService = require('../services/VideoService');
 const audioExtractor = require('../utils/audioExtractor');
+const ErrorCodes = require('../errors/errorCodes');
 
 test('DownloadService.downloadVideo 使用解析结果标题生成文件名', async () => {
   const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
@@ -70,7 +71,11 @@ test('DownloadService.downloadAudio 在无可用媒体地址时抛出 400 错误
   try {
     await assert.rejects(
       () => DownloadService.downloadAudio('https://www.douyin.com/video/1', '', {}, () => {}),
-      (error) => error.message === 'No audio or video URL available' && error.statusCode === 400
+      (error) =>
+        error.message === 'No audio or video URL available' &&
+        error.code === ErrorCodes.DOWNLOAD_RESOURCE_MISSING &&
+        error.isBusiness === true &&
+        error.httpStatus === 200
     );
   } finally {
     VideoService.getOrParseVideoData = originalGetOrParseVideoData;

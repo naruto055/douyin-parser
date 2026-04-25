@@ -8,6 +8,7 @@ const aiRoutes = require('./routes/ai');
 const errorHandler = require('./middleware/errorHandler');
 const { apiLimiter } = require('./middleware/rateLimit');
 const browserPool = require('./utils/browserPool');
+const response = require('./utils/response');
 
 const app = express();
 
@@ -24,7 +25,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, message: 'Service is running', timestamp: new Date().toISOString() });
+  response.ok(res, { timestamp: new Date().toISOString() }, 'Service is running');
 });
 
 app.use('/api/ai', aiRoutes);

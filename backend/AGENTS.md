@@ -56,13 +56,26 @@ pnpm dev
 - 复用既有错误处理与响应模式，避免同类逻辑多套写法。
 - 注释语言保持简体中文，仅在复杂逻辑前补充必要说明。
 
-## 7. 测试与文档同步
+## 7. 统一响应与异常处理
+
+- 普通 JSON 接口统一使用 `utils/response.js` 输出响应，不要在路由中手写多套 `{ success, error }` 或 `{ success, data }` 结构。
+- 成功响应使用 `response.ok(res, data, message)`，结构为 `{ success: true, code: 'OK', message, data }`。
+- 失败响应使用 `response.fail(res, code, message, data, httpStatus)` 或抛出 `errors/AppError.js`，结构为 `{ success: false, code, message, data }`。
+- 错误码统一从 `errors/errorCodes.js` 引用，禁止在业务代码中散落未定义的错误码字符串。
+- 业务可预期异常必须抛出 `AppError`，默认 `isBusiness: true`、`httpStatus: 200`，由 `middleware/errorHandler.js` 转换为 HTTP 200 + 业务错误码。
+- 非业务异常使用 `AppError` 时必须显式设置 `isBusiness: false` 与对应 `httpStatus`，例如参数错误使用 `VALIDATION_ERROR` + HTTP 400。
+- 普通未知异常交给 `errorHandler` 处理，不要在路由层吞掉异常后返回自定义结构。
+- 如果旧依赖或第三方库抛出的错误带有 `status` / `statusCode`，`errorHandler` 会保留 HTTP 状态码；新增代码优先使用 `AppError` 表达可预期异常。
+- 文件下载响应和 SSE 建立后的事件流不强行包装为普通 JSON；只能在尚未写入文件流或尚未初始化 SSE 前返回统一 JSON 错误。
+- 新增或调整异常类型时，同步更新 `backend/docs/API.md` 与对应测试。
+
+## 8. 测试与文档同步
 
 - 修改路由、服务、AI 运行时或工具行为时，优先补充或更新对应测试。
 - 接口契约变化时，同步更新 `backend/docs/API.md`。
 - 若变更影响联调页面行为，检查 `public/` 下相关脚本是否需要同步。
 
-## 8. 明确不要做的事
+## 9. 明确不要做的事
 
 - 不直接修改 `node_modules/`、`temp/` 中的运行时产物。
 - 不在路由层堆积业务逻辑。

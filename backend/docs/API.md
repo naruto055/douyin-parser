@@ -18,26 +18,53 @@
 - AI 对话接口 `POST /api/ai/chat`、`POST /api/ai/chat/stream`：每分钟 10 次请求
 - 超出限制返回：429 Too Many Requests
 
-### 响应格式
+### 统一响应格式
 
-所有 API 响应遵循以下格式：
+普通 JSON 接口统一返回以下结构：
 
 **成功响应**:
 ```json
 {
   "success": true,
-  "data": { ... }
+  "code": "OK",
+  "message": "success",
+  "data": {}
 }
 ```
 
-**错误响应**:
+**失败响应**:
 ```json
 {
   "success": false,
-  "error": "错误描述信息"
+  "code": "VALIDATION_ERROR",
+  "message": "错误描述信息",
+  "data": null
 }
 ```
 
+字段说明：
+
+- `success`：请求是否达到业务成功状态。
+- `code`：业务或错误码，成功时为 `OK`。
+- `message`：面向调用方的简要说明。
+- `data`：业务数据；失败时通常为 `null`。
+
+业务可预期失败返回 HTTP 200，并通过 `success=false` 与 `code` 表达失败原因。参数错误、限流、未知系统异常等非业务异常保留对应 HTTP 状态码。
+
+文件下载接口和 SSE 流式接口不强制包装为普通 JSON 响应；其中 `/api/ai/chat/stream` 在 SSE 建立前的参数错误仍返回统一 JSON。
+
+### 错误码
+
+| code | HTTP 状态码 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `OK` | 200 | 成功 | 请求成功 |
+| `VALIDATION_ERROR` | 400 | 非业务异常 | 参数错误 |
+| `PARSE_FAILED` | 200 | 业务异常 | 视频解析失败 |
+| `VIDEO_UNAVAILABLE` | 200 | 业务异常 | 视频资源不可用 |
+| `DOWNLOAD_RESOURCE_MISSING` | 200 | 业务异常 | 下载资源缺失 |
+| `AI_CHAT_FAILED` | 200 | 业务异常 | AI 对话业务失败 |
+| `RATE_LIMITED` | 429 | 非业务异常 | 请求过于频繁 |
+| `INTERNAL_ERROR` | 500 | 非业务异常 | 未知系统异常 |
 ---
 
 ## API 接口
@@ -55,8 +82,11 @@ GET /api/health
 ```json
 {
   "success": true,
+  "code": "OK",
   "message": "Service is running",
-  "timestamp": "2024-01-01T12:00:00.000Z"
+  "data": {
+    "timestamp": "2024-01-01T12:00:00.000Z"
+  }
 }
 ```
 
@@ -85,6 +115,8 @@ Content-Type: application/json
 ```json
 {
   "success": true,
+  "code": "OK",
+  "message": "success",
   "data": {
     "source": "puppeteer",
     "title": "视频标题",
@@ -114,7 +146,9 @@ Content-Type: application/json
 ```json
 {
   "success": false,
-  "error": "URL is required"
+  "code": "VALIDATION_ERROR",
+  "message": "URL is required",
+  "data": null
 }
 ```
 
@@ -154,7 +188,9 @@ GET /api/download?type=audio&url=https://v.douyin.com/xxxxx/
 ```json
 {
   "success": false,
-  "error": "type and url are required"
+  "code": "VALIDATION_ERROR",
+  "message": "type and url are required",
+  "data": null
 }
 ```
 
@@ -230,7 +266,9 @@ Content-Type: application/json
 ```json
 {
   "success": false,
-  "error": "LLM API key is not configured"
+  "code": "AI_CHAT_FAILED",
+  "message": "LLM API key is not configured",
+  "data": null
 }
 ```
 
@@ -300,16 +338,6 @@ data: {"thinking":"...","reply":"解析成功，标题是示例标题。","sessi
 
 ---
 
-## 错误码说明
-
-| HTTP 状态码 | 说明 |
-|-------------|------|
-| 200 | 请求成功 |
-| 400 | 请求参数错误 |
-| 429 | 请求过于频繁，超出速率限制 |
-| 500 | 服务器内部错误 |
-
----
 
 ## 使用示例
 
@@ -382,7 +410,7 @@ async function parseAndDownload(shareUrl) {
   // 1. 解析获取视频信息
   const result = await parseVideo(shareUrl);
   if (!result.success) {
-    console.error('解析失败:', result.error);
+    console.error('解析失败:', result.message, result.code);
     return;
   }
 
