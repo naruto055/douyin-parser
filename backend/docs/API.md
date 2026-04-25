@@ -25,8 +25,7 @@
 **成功响应**:
 ```json
 {
-  "success": true,
-  "code": "OK",
+  "code": 200,
   "message": "success",
   "data": {}
 }
@@ -35,8 +34,7 @@
 **失败响应**:
 ```json
 {
-  "success": false,
-  "code": "VALIDATION_ERROR",
+  "code": 400,
   "message": "错误描述信息",
   "data": null
 }
@@ -44,27 +42,26 @@
 
 字段说明：
 
-- `success`：请求是否达到业务成功状态。
-- `code`：业务或错误码，成功时为 `OK`。
+- `code`：数字响应码，成功时为 `200`，失败时尽量与 HTTP 状态语义保持一致。
 - `message`：面向调用方的简要说明。
 - `data`：业务数据；失败时通常为 `null`。
 
-业务可预期失败返回 HTTP 200，并通过 `success=false` 与 `code` 表达失败原因。参数错误、限流、未知系统异常等非业务异常保留对应 HTTP 状态码。
+业务可预期失败返回 HTTP 200，并通过非 `200` 的 `code` 表达失败原因。参数错误、限流、未知系统异常等非业务异常保留对应 HTTP 状态码。
 
 文件下载接口和 SSE 流式接口不强制包装为普通 JSON 响应；其中 `/api/ai/chat/stream` 在 SSE 建立前的参数错误仍返回统一 JSON。
 
 ### 错误码
 
-| code | HTTP 状态码 | 类型 | 说明 |
-| --- | --- | --- | --- |
-| `OK` | 200 | 成功 | 请求成功 |
-| `VALIDATION_ERROR` | 400 | 非业务异常 | 参数错误 |
-| `PARSE_FAILED` | 200 | 业务异常 | 视频解析失败 |
-| `VIDEO_UNAVAILABLE` | 200 | 业务异常 | 视频资源不可用 |
-| `DOWNLOAD_RESOURCE_MISSING` | 200 | 业务异常 | 下载资源缺失 |
-| `AI_CHAT_FAILED` | 200 | 业务异常 | AI 对话业务失败 |
-| `RATE_LIMITED` | 429 | 非业务异常 | 请求过于频繁 |
-| `INTERNAL_ERROR` | 500 | 非业务异常 | 未知系统异常 |
+| code | 常量 | HTTP 状态码 | 类型 | 说明 |
+| --- | --- | --- | --- | --- |
+| `200` | `OK` | 200 | 成功 | 请求成功 |
+| `400` | `VALIDATION_ERROR` | 400 | 非业务异常 | 参数错误 |
+| `500` | `PARSE_FAILED` | 200 | 业务异常 | 视频解析失败 |
+| `500` | `VIDEO_UNAVAILABLE` | 200 | 业务异常 | 视频资源不可用 |
+| `500` | `DOWNLOAD_RESOURCE_MISSING` | 200 | 业务异常 | 下载资源缺失 |
+| `500` | `AI_CHAT_FAILED` | 200 | 业务异常 | AI 对话业务失败 |
+| `429` | `RATE_LIMITED` | 429 | 非业务异常 | 请求过于频繁 |
+| `500` | `INTERNAL_ERROR` | 500 | 非业务异常 | 未知系统异常 |
 ---
 
 ## API 接口
@@ -81,8 +78,7 @@ GET /api/health
 **响应示例**:
 ```json
 {
-  "success": true,
-  "code": "OK",
+  "code": 200,
   "message": "Service is running",
   "data": {
     "timestamp": "2024-01-01T12:00:00.000Z"
@@ -114,8 +110,7 @@ Content-Type: application/json
 **响应示例**:
 ```json
 {
-  "success": true,
-  "code": "OK",
+  "code": 200,
   "message": "success",
   "data": {
     "source": "puppeteer",
@@ -145,8 +140,7 @@ Content-Type: application/json
 **错误响应**:
 ```json
 {
-  "success": false,
-  "code": "VALIDATION_ERROR",
+  "code": 400,
   "message": "URL is required",
   "data": null
 }
@@ -187,8 +181,7 @@ GET /api/download?type=audio&url=https://v.douyin.com/xxxxx/
 **错误响应示例**:
 ```json
 {
-  "success": false,
-  "code": "VALIDATION_ERROR",
+  "code": 400,
   "message": "type and url are required",
   "data": null
 }
@@ -220,7 +213,8 @@ Content-Type: application/json
 **响应示例**:
 ```json
 {
-  "success": true,
+  "code": 200,
+  "message": "success",
   "data": {
     "thinking": "用户提供了有效抖音链接，我先基于工具结果整理结构化信息，再给出简短说明。",
     "reply": "解析成功，这个视频的标题是示例标题，作者是示例作者。",
@@ -265,8 +259,7 @@ Content-Type: application/json
 **错误响应示例**:
 ```json
 {
-  "success": false,
-  "code": "AI_CHAT_FAILED",
+  "code": 500,
   "message": "LLM API key is not configured",
   "data": null
 }
@@ -409,7 +402,7 @@ function downloadAudio(shareUrl, title) {
 async function parseAndDownload(shareUrl) {
   // 1. 解析获取视频信息
   const result = await parseVideo(shareUrl);
-  if (!result.success) {
+  if (result.code !== 200) {
     console.error('解析失败:', result.message, result.code);
     return;
   }

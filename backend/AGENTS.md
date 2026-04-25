@@ -58,12 +58,12 @@ pnpm dev
 
 ## 7. 统一响应与异常处理
 
-- 普通 JSON 接口统一使用 `utils/response.js` 输出响应，不要在路由中手写多套 `{ success, error }` 或 `{ success, data }` 结构。
-- 成功响应使用 `response.ok(res, data, message)`，结构为 `{ success: true, code: 'OK', message, data }`。
-- 失败响应使用 `response.fail(res, code, message, data, httpStatus)` 或抛出 `errors/AppError.js`，结构为 `{ success: false, code, message, data }`。
+- 普通 JSON 接口统一使用 `utils/response.js` 输出响应，不要在路由中手写多套 `{ code, message, data }` 之外的响应结构。
+- 成功响应使用 `response.ok(res, data, message)`，结构为 `{ code: 200, message, data }`。
+- 失败响应使用 `response.fail(res, code, message, data, httpStatus)` 或抛出 `errors/AppError.js`，结构为 `{ code, message, data }`。
 - 错误码统一从 `errors/errorCodes.js` 引用，禁止在业务代码中散落未定义的错误码字符串。
 - 业务可预期异常必须抛出 `AppError`，默认 `isBusiness: true`、`httpStatus: 200`，由 `middleware/errorHandler.js` 转换为 HTTP 200 + 业务错误码。
-- 非业务异常使用 `AppError` 时必须显式设置 `isBusiness: false` 与对应 `httpStatus`，例如参数错误使用 `VALIDATION_ERROR` + HTTP 400。
+- 非业务异常使用 `AppError` 时必须显式设置 `isBusiness: false` 与对应 `httpStatus`，例如参数错误使用 `ErrorCodes.VALIDATION_ERROR` + HTTP 400。
 - 普通未知异常交给 `errorHandler` 处理，不要在路由层吞掉异常后返回自定义结构。
 - 如果旧依赖或第三方库抛出的错误带有 `status` / `statusCode`，`errorHandler` 会保留 HTTP 状态码；新增代码优先使用 `AppError` 表达可预期异常。
 - 文件下载响应和 SSE 建立后的事件流不强行包装为普通 JSON；只能在尚未写入文件流或尚未初始化 SSE 前返回统一 JSON 错误。

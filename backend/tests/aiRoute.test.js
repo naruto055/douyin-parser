@@ -33,10 +33,10 @@ test('AI 路由在缺少 message 时返回 400', async () => {
   });
 
   assert.equal(res.statusCode, 400);
-  assert.equal(res.payload.success, false);
   assert.equal(res.payload.code, ErrorCodes.VALIDATION_ERROR);
   assert.equal(res.payload.message, 'message is required');
   assert.equal(res.payload.data, null);
+  assert.equal(Object.hasOwn(res.payload, 'success'), false);
 });
 
 test('AI 路由在成功时返回统一结构', async () => {
@@ -60,11 +60,11 @@ test('AI 路由在成功时返回统一结构', async () => {
     });
 
     assert.equal(res.statusCode, 200);
-    assert.equal(res.payload.success, true);
     assert.equal(res.payload.code, ErrorCodes.OK);
     assert.equal(res.payload.message, 'success');
     assert.equal(res.payload.data.thinking, '思考内容');
     assert.equal(res.payload.data.reply, 'ok');
+    assert.equal(Object.hasOwn(res.payload, 'success'), false);
   } finally {
     AIChatService.chat = originalChat;
   }
@@ -86,10 +86,10 @@ test('AI 路由在服务失败时返回业务错误码', async () => {
     await handler(req, res, (error) => errorHandler(error, req, res, () => {}));
 
     assert.equal(res.statusCode, 200);
-    assert.equal(res.payload.success, false);
     assert.equal(res.payload.code, ErrorCodes.AI_CHAT_FAILED);
     assert.equal(res.payload.message, 'LLM API key is not configured');
     assert.equal(res.payload.data, null);
+    assert.equal(Object.hasOwn(res.payload, 'success'), false);
   } finally {
     AIChatService.chat = originalChat;
   }

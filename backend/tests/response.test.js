@@ -6,6 +6,19 @@ const ErrorCodes = require('../errors/errorCodes');
 const response = require('../utils/response');
 const errorHandler = require('../middleware/errorHandler');
 
+test('ErrorCodes 使用数字码', () => {
+  assert.deepEqual(ErrorCodes, {
+    OK: 200,
+    VALIDATION_ERROR: 400,
+    PARSE_FAILED: 500,
+    VIDEO_UNAVAILABLE: 500,
+    DOWNLOAD_RESOURCE_MISSING: 500,
+    AI_CHAT_FAILED: 500,
+    RATE_LIMITED: 429,
+    INTERNAL_ERROR: 500
+  });
+});
+
 function createResponse() {
   return {
     statusCode: 200,
@@ -57,11 +70,11 @@ test('response.ok 返回统一成功结构', () => {
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.payload, {
-    success: true,
     code: ErrorCodes.OK,
     message: 'success',
     data: { id: 1 }
   });
+  assert.equal(Object.hasOwn(res.payload, 'success'), false);
 });
 
 test('response.fail 默认以 HTTP 200 返回业务失败结构', () => {
@@ -71,11 +84,11 @@ test('response.fail 默认以 HTTP 200 返回业务失败结构', () => {
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.payload, {
-    success: false,
     code: ErrorCodes.PARSE_FAILED,
     message: '视频解析失败',
     data: null
   });
+  assert.equal(Object.hasOwn(res.payload, 'success'), false);
 });
 
 test('response.fail 支持非业务 HTTP 状态码', () => {
@@ -85,11 +98,11 @@ test('response.fail 支持非业务 HTTP 状态码', () => {
 
   assert.equal(res.statusCode, 400);
   assert.deepEqual(res.payload, {
-    success: false,
     code: ErrorCodes.VALIDATION_ERROR,
     message: 'url is required',
     data: { field: 'url' }
   });
+  assert.equal(Object.hasOwn(res.payload, 'success'), false);
 });
 
 test('errorHandler 将业务 AppError 转为 HTTP 200 统一失败响应', () => {
@@ -103,11 +116,11 @@ test('errorHandler 将业务 AppError 转为 HTTP 200 统一失败响应', () =>
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.payload, {
-    success: false,
     code: ErrorCodes.PARSE_FAILED,
     message: '视频解析失败',
     data: null
   });
+  assert.equal(Object.hasOwn(res.payload, 'success'), false);
 });
 
 test('errorHandler 将非业务 AppError 转为指定 HTTP 状态码', () => {
@@ -123,11 +136,11 @@ test('errorHandler 将非业务 AppError 转为指定 HTTP 状态码', () => {
 
   assert.equal(res.statusCode, 400);
   assert.deepEqual(res.payload, {
-    success: false,
     code: ErrorCodes.VALIDATION_ERROR,
     message: 'url is required',
     data: null
   });
+  assert.equal(Object.hasOwn(res.payload, 'success'), false);
 });
 
 test('errorHandler 将未知异常转为 HTTP 500', () => {
@@ -137,11 +150,11 @@ test('errorHandler 将未知异常转为 HTTP 500', () => {
 
   assert.equal(res.statusCode, 500);
   assert.deepEqual(res.payload, {
-    success: false,
     code: ErrorCodes.INTERNAL_ERROR,
     message: 'Internal Server Error',
     data: null
   });
+  assert.equal(Object.hasOwn(res.payload, 'success'), false);
 });
 
 test('errorHandler 保留普通错误对象上的 HTTP 状态码', () => {
@@ -153,9 +166,9 @@ test('errorHandler 保留普通错误对象上的 HTTP 状态码', () => {
 
   assert.equal(res.statusCode, 400);
   assert.deepEqual(res.payload, {
-    success: false,
     code: ErrorCodes.VALIDATION_ERROR,
     message: 'Bad Request',
     data: null
   });
+  assert.equal(Object.hasOwn(res.payload, 'success'), false);
 });

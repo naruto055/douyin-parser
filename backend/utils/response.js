@@ -4,7 +4,7 @@ const ErrorCodes = require('../errors/errorCodes');
  * 返回统一的成功响应。
  *
  * 用法：在路由或控制器中调用 `ok(res, data, message)`，会以 HTTP 200
- * 返回 `{ success: true, code, message, data }` 格式的 JSON 数据。
+ * 返回 `{ code, message, data }` 格式的 JSON 数据。
  *
  * @param {import('express').Response} res Express 响应对象。
  * @param {*} [data=null] 响应数据，默认返回 null。
@@ -13,7 +13,6 @@ const ErrorCodes = require('../errors/errorCodes');
  */
 function ok(res, data = null, message = 'success') {
   return res.status(200).json({
-    success: true,
     code: ErrorCodes.OK,
     message,
     data
@@ -24,7 +23,7 @@ function ok(res, data = null, message = 'success') {
  * 返回统一的失败响应。
  *
  * 用法：在业务校验失败或异常处理中调用 `fail(res, code, message, data, httpStatus)`，
- * 会返回 `{ success: false, code, message, data }` 格式的 JSON 数据。
+ * 会返回 `{ code, message, data }` 格式的 JSON 数据。
  *
  * @param {import('express').Response} res Express 响应对象。
  * @param {string|number} code 业务错误码，通常来自 ErrorCodes。
@@ -35,7 +34,6 @@ function ok(res, data = null, message = 'success') {
  */
 function fail(res, code, message, data = null, httpStatus = 200) {
   return res.status(httpStatus).json({
-    success: false,
     code,
     message,
     data

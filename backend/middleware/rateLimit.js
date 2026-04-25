@@ -15,7 +15,6 @@ const apiLimiter = rateLimit({
   max: config.rateLimit.max,
   // 触发限流时返回给客户端的统一响应体。
   message: {
-    success: false,
     code: ErrorCodes.RATE_LIMITED,
     message: 'Too many requests, please try again later',
     data: null
@@ -52,7 +51,6 @@ const aiLimiter = rateLimit({
   max: config.ai.rateLimit.max,
   // 触发 AI 限流时返回给客户端的统一响应体。
   message: {
-    success: false,
     code: ErrorCodes.RATE_LIMITED,
     message: 'AI requests are too frequent, please try again later',
     data: null

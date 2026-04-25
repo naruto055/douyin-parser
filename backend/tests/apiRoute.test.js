@@ -41,10 +41,10 @@ test('解析路由在服务失败时返回业务错误码', async () => {
     await handler(req, res, (error) => errorHandler(error, req, res, () => {}));
 
     assert.equal(res.statusCode, 200);
-    assert.equal(res.payload.success, false);
     assert.equal(res.payload.code, ErrorCodes.PARSE_FAILED);
     assert.equal(res.payload.message, 'parse failed');
     assert.equal(res.payload.data, null);
+    assert.equal(Object.hasOwn(res.payload, 'success'), false);
   } finally {
     VideoService.parseVideo = originalParseVideo;
   }

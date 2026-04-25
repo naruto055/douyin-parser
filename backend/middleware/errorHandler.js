@@ -7,7 +7,7 @@ const response = require('../utils/response');
  *
  * 文件作用：集中处理 Express 路由、中间件和服务层向外抛出的错误，
  * 将不同来源的异常统一转换成项目标准响应结构：
- * `{ success: false, code, message, data }`。
+ * `{ code, message, data }`。
  *
  * 使用方式：在 app.js 中应放在所有路由之后注册，例如：
  * `app.use(errorHandler)`。

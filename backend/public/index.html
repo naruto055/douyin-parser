@@ -787,8 +787,8 @@
 
         const result = await response.json();
 
-        if (!response.ok || !result.success) {
-          const errorMessage = result.error || '请求失败';
+        if (!response.ok || result.code !== 200) {
+          const errorMessage = result.message || result.error || '请求失败';
           addRunEvent('error', { error: errorMessage });
           throw new Error(errorMessage);
         }
