@@ -37,7 +37,7 @@ class VideoService {
     const videoId = douyinParser.extractVideoId(realUrl);
     const cacheKey = this._generateCacheKey(videoId, realUrl);
 
-    let parsedData = cache.get(cacheKey);
+    let parsedData = options.forceRefresh ? null : cache.get(cacheKey);
     if (parsedData) {
       // 缓存命中时直接返回，避免重复启动解析链路，减少外部页面变化和网络延迟带来的不确定性。
       console.log(options.cacheHitLogMessage || 'Using cached parsed data for video:', videoId || cacheKey);

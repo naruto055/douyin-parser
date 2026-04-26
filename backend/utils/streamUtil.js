@@ -9,13 +9,17 @@ const axios = require('axios');
  * @param {string} contentType 响应 Content-Type
  * @returns {Promise<void>}
  */
-async function streamFromUrl(url, res, filename, contentType) {
+async function streamFromUrl(url, res, filename, contentType, requestContext = {}) {
   try {
     const response = await axios({
       method: 'GET',
       url,
       responseType: 'stream',
-      timeout: 60000
+      timeout: 60000,
+      headers: {
+        Accept: '*/*',
+        ...requestContext.headers
+      }
     });
 
     res.setHeader('Content-Type', contentType);

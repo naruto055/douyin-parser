@@ -23,6 +23,13 @@ test('DownloadService.downloadVideo 使用解析结果标题生成文件名', as
     assert.equal(streamCalls[0][0], 'https://example.com/video.mp4');
     assert.equal(streamCalls[0][2], 'video_title.mp4');
     assert.equal(streamCalls[0][3], 'video/mp4');
+    assert.deepEqual(streamCalls[0][4], {
+      headers: {
+        Referer: 'https://www.douyin.com/video/1',
+        Origin: 'https://www.douyin.com',
+        'User-Agent': DownloadService.DEFAULT_BROWSER_UA
+      }
+    });
   } finally {
     VideoService.getOrParseVideoData = originalGetOrParseVideoData;
     DownloadService.streamMedia = originalStreamMedia;
@@ -51,6 +58,13 @@ test('DownloadService.downloadAudio 优先直连音频流', async () => {
     assert.equal(streamCalls[0][0], 'https://example.com/audio.mp3');
     assert.equal(streamCalls[0][2], 'audio_title.mp3');
     assert.equal(streamCalls[0][3], 'audio/mpeg');
+    assert.deepEqual(streamCalls[0][4], {
+      headers: {
+        Referer: 'https://www.douyin.com/video/1',
+        Origin: 'https://www.douyin.com',
+        'User-Agent': DownloadService.DEFAULT_BROWSER_UA
+      }
+    });
   } finally {
     VideoService.getOrParseVideoData = originalGetOrParseVideoData;
     DownloadService.streamMedia = originalStreamMedia;
@@ -79,5 +93,81 @@ test('DownloadService.downloadAudio 在无可用媒体地址时抛出 400 错误
     );
   } finally {
     VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+  }
+});
+
+test('DownloadService.downloadVideo 在首次 403 时强制刷新解析结果后重试一次', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalStreamMedia = DownloadService.streamMedia;
+  const parseCalls = [];
+  const streamCalls = [];
+
+  VideoService.getOrParseVideoData = async (url, options = {}) => {
+    parseCalls.push(options);
+    if (options.forceRefresh) {
+      return {
+        title: 'fresh-video',
+        videoUrl: 'https://example.com/fresh.mp4'
+      };
+    }
+
+    return {
+      title: 'stale-video',
+      videoUrl: 'https://example.com/stale.mp4'
+    };
+  };
+
+  DownloadService.streamMedia = async (...args) => {
+    streamCalls.push(args);
+    if (streamCalls.length === 1) {
+      const error = new Error('forbidden');
+      error.response = { status: 403 };
+      throw error;
+    }
+  };
+
+  try {
+    await DownloadService.downloadVideo('https://www.douyin.com/video/2', '', {});
+    assert.equal(streamCalls.length, 2);
+    assert.equal(streamCalls[0][0], 'https://example.com/stale.mp4');
+    assert.equal(streamCalls[1][0], 'https://example.com/fresh.mp4');
+    assert.equal(parseCalls.length, 2);
+    assert.equal(parseCalls[0].forceRefresh, undefined);
+    assert.equal(parseCalls[1].forceRefresh, true);
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService.streamMedia = originalStreamMedia;
+  }
+});
+
+test('DownloadService.downloadVideo 会清洗分享文案中的链接后再写入 Referer', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalStreamMedia = DownloadService.streamMedia;
+  const streamCalls = [];
+  const shareText = [
+    '8.52 复制打开抖音，看看【测试用户】的视频',
+    'https://www.iesdouyin.com/share/video/7604426431498532849/?region=CN',
+    ' 09/01 abc:/ '
+  ].join('\r\n');
+
+  VideoService.getOrParseVideoData = async () => ({
+    title: 'share-text-video',
+    videoUrl: 'https://example.com/video.mp4'
+  });
+  DownloadService.streamMedia = async (...args) => streamCalls.push(args);
+
+  try {
+    await DownloadService.downloadVideo(shareText, '', {});
+    assert.equal(streamCalls.length, 1);
+    assert.deepEqual(streamCalls[0][4], {
+      headers: {
+        Referer: 'https://www.iesdouyin.com/share/video/7604426431498532849/?region=CN',
+        Origin: 'https://www.douyin.com',
+        'User-Agent': DownloadService.DEFAULT_BROWSER_UA
+      }
+    });
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService.streamMedia = originalStreamMedia;
   }
 });
