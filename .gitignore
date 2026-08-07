@@ -2,6 +2,11 @@ node_modules/
 temp/
 *.log
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
 .env
 dist/
 .claude/
