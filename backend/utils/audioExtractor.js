@@ -22,6 +22,19 @@ function ensureTempDir() {
   return tempDir;
 }
 
+function resolveFfmpegPath() {
+  if (process.env.FFMPEG_PATH) {
+    return process.env.FFMPEG_PATH;
+  }
+
+  if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
+    return ffmpegStatic;
+  }
+
+  // ffmpeg-static 在部分 Windows/pnpm 环境可能缺少二进制，回退到系统 PATH。
+  return 'ffmpeg';
+}
+
 /**
  * 将视频流中的音频轨道提取为 mp3 文件。
  *
@@ -29,9 +42,25 @@ function ensureTempDir() {
  * @param {string} outputPath 输出音频文件路径
  * @returns {Promise<string>} 提取成功后的输出路径
  */
-async function extractAudio(videoUrl, outputPath) {
+function buildFfmpegInputOptions(headers = {}) {
+  const headerLines = Object.entries(headers)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('\r\n');
+
+  return headerLines ? ['-headers', `${headerLines}\r\n`] : [];
+}
+
+async function extractAudio(videoUrl, outputPath, requestContext = {}) {
   return new Promise((resolve, reject) => {
-    ffmpeg(videoUrl)
+    ffmpeg.setFfmpegPath(resolveFfmpegPath());
+    const command = ffmpeg(videoUrl);
+    const inputOptions = buildFfmpegInputOptions(requestContext && requestContext.headers);
+    if (inputOptions.length > 0) {
+      command.inputOptions(inputOptions);
+    }
+
+    command
       // 仅保留音频，避免无意义的视频转码开销。
       .noVideo()
       .audioCodec('libmp3lame')
@@ -64,14 +93,14 @@ async function extractAudio(videoUrl, outputPath) {
  * @param {string} videoUrl 视频资源地址
  * @returns {Promise<{path: string, filename: string}>} 生成的音频文件信息
  */
-async function extractAudioFromUrl(videoUrl) {
+async function extractAudioFromUrl(videoUrl, requestContext = {}) {
   const tempDir = ensureTempDir();
   // 使用 UUID 避免并发请求时临时文件重名。
   const outputFilename = `${uuidv4()}.mp3`;
   const outputPath = path.join(tempDir, outputFilename);
 
   try {
-    await extractAudio(videoUrl, outputPath);
+    await extractAudio(videoUrl, outputPath, requestContext);
     return {
       path: outputPath,
       filename: outputFilename

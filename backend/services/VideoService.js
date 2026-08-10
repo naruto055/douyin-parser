@@ -1,7 +1,10 @@
 const crypto = require('crypto');
 
+const config = require('../config');
 const cache = require('../utils/cache');
 const douyinParser = require('../utils/douyinParser');
+
+const CDN_CACHE_SAFETY_MARGIN_MS = 60000;
 
 class VideoService {
   /**
@@ -10,11 +13,11 @@ class VideoService {
    * @param {string} url 用户提交的视频地址或包含视频地址的分享文本。
    * @returns {Promise<object>} 解析器返回的视频数据。
    */
-  static async parseVideo(url) {
+  static async parseVideo(url, options = {}) {
     // 这里把可变行为交给 getOrParseVideoData，避免解析、缓存等主流程在多个方法中重复。
     return this.getOrParseVideoData(url, {
-      parseInput: url,
-      cacheHitLogMessage: 'Using cached result for video:'
+      cacheHitLogMessage: 'Using cached result for video:',
+      ...options
     });
   }
 
@@ -29,10 +32,13 @@ class VideoService {
    * @returns {Promise<object>} 缓存或解析器返回的视频数据。
    */
   static async getOrParseVideoData(url, options = {}) {
+    const totalStartTime = Date.now();
     // 抖音分享文本通常混有标题和链接，先抽取真实 URL 可以让服务层兼容更多输入形态。
     const extractedUrl = douyinParser.extractUrlFromText(url) || url;
+    const shortUrlStartTime = Date.now();
     // 短链解析属于 I/O 操作，所以使用 await 保证后续 videoId 提取基于最终跳转地址。
     const realUrl = await douyinParser.resolveShortUrl(extractedUrl);
+    console.log(`VideoService short URL resolution completed in ${Date.now() - shortUrlStartTime}ms`);
     // videoId 是更稳定的缓存维度；如果解析失败，后面会退回到 URL 哈希作为兜底键。
     const videoId = douyinParser.extractVideoId(realUrl);
     const cacheKey = this._generateCacheKey(videoId, realUrl);
@@ -46,15 +52,23 @@ class VideoService {
 
     if (options.parseLogLabel === 'download') {
       // 下载场景单独打日志，便于排查“解析成功但下载失败”和“解析阶段失败”的边界。
-      console.log('Parsing URL for download:', realUrl);
+      console.log('Parsing URL for download:', douyinParser.sanitizeUrlForLog(realUrl));
     }
 
     // parseInput 允许调用方保留原始输入；默认使用 realUrl，确保普通解析路径基于规范化后的地址。
-    parsedData = await douyinParser.parse(options.parseInput || realUrl);
+    const parseStartTime = Date.now();
+    parsedData = await douyinParser.parse(options.parseInput || realUrl, {
+      skipShortUrlResolution: !options.parseInput
+    });
+    console.log(`VideoService parser completed in ${Date.now() - parseStartTime}ms`);
     // 只在解析成功后写缓存，避免把失败或不完整结果固化到后续请求中。
-    cache.set(cacheKey, parsedData);
+    const cacheTtl = this._resolveCacheTtl(parsedData);
+    if (cacheTtl > 0) {
+      cache.set(cacheKey, parsedData, cacheTtl);
+    }
 
     // 返回值保持为解析器的原始结果，服务层不额外改形状，避免破坏上层已有契约。
+    console.log(`VideoService parse flow completed in ${Date.now() - totalStartTime}ms`);
     return parsedData;
   }
 
@@ -68,6 +82,28 @@ class VideoService {
   static _generateCacheKey(videoId, url) {
     // 优先使用业务 ID；没有 ID 时使用 md5 生成短且稳定的键，避免原始 URL 过长影响缓存存取。
     return videoId || crypto.createHash('md5').update(url).digest('hex');
+  }
+
+  /**
+   * 根据 CDN URL 过期时间收缩缓存 TTL，避免缓存已失效的签名地址。
+   *
+   * @param {object} parsedData 解析结果
+   * @returns {number} 可缓存 TTL，单位毫秒；0 表示不缓存
+   */
+  static _resolveCacheTtl(parsedData) {
+    const defaultTtl = config.cacheTTL;
+    const expiresAt = Number(parsedData?.videoExpiresAt);
+
+    if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+      return defaultTtl;
+    }
+
+    const cdnTtl = expiresAt * 1000 - Date.now() - CDN_CACHE_SAFETY_MARGIN_MS;
+    if (cdnTtl <= 0) {
+      return 0;
+    }
+
+    return Math.min(defaultTtl, cdnTtl);
   }
 }
 

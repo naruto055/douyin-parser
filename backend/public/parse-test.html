@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>抖音解析接口测试台</title>
+    <style>
+      :root {
+        --paper: #f4efe2;
+        --ink: #181512;
+        --muted: #6f675c;
+        --line: #29231c;
+        --panel: #fffaf0;
+        --panel-2: #ede2cf;
+        --red: #d93f2f;
+        --blue: #176b87;
+        --green: #3c7a4d;
+        --amber: #b6741a;
+        --shadow: rgba(24, 21, 18, 0.18);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(90deg, rgba(24, 21, 18, 0.06) 1px, transparent 1px) 0 0 / 36px 36px,
+          linear-gradient(0deg, rgba(24, 21, 18, 0.05) 1px, transparent 1px) 0 0 / 36px 36px,
+          radial-gradient(circle at 10% 10%, rgba(217, 63, 47, 0.14), transparent 32%),
+          radial-gradient(circle at 90% 0%, rgba(23, 107, 135, 0.14), transparent 30%),
+          var(--paper);
+        color: var(--ink);
+        font-family: "Iowan Old Style", "Yu Mincho", "Songti SC", serif;
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      .page {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 32px 0 48px;
+      }
+
+      .masthead {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 20px;
+        align-items: end;
+        border-bottom: 4px solid var(--line);
+        padding-bottom: 18px;
+        margin-bottom: 22px;
+      }
+
+      .eyebrow {
+        display: inline-block;
+        border: 2px solid var(--line);
+        background: var(--red);
+        color: #fff8e8;
+        padding: 5px 10px;
+        font-family: "Cascadia Mono", "Consolas", monospace;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 820px;
+        margin: 12px 0 0;
+        font-size: clamp(36px, 7vw, 76px);
+        line-height: 0.92;
+        letter-spacing: -0.02em;
+      }
+
+      .health {
+        min-width: 190px;
+        border: 2px solid var(--line);
+        background: var(--panel);
+        box-shadow: 7px 7px 0 var(--line);
+        padding: 14px;
+      }
+
+      .health strong,
+      .label {
+        display: block;
+        font-family: "Cascadia Mono", "Consolas", monospace;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .health span {
+        display: block;
+        margin-top: 8px;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(320px, 0.95fr) minmax(360px, 1.05fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .panel {
+        border: 2px solid var(--line);
+        background: var(--panel);
+        box-shadow: 8px 8px 0 var(--line);
+      }
+
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        border-bottom: 2px solid var(--line);
+        padding: 14px 16px;
+        background: var(--panel-2);
+      }
+
+      .panel-head h2 {
+        margin: 0;
+        font-size: 20px;
+      }
+
+      .panel-body {
+        padding: 16px;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 190px;
+        resize: vertical;
+        border: 2px solid var(--line);
+        background: #fffef8;
+        color: var(--ink);
+        padding: 14px;
+        line-height: 1.65;
+        outline: none;
+      }
+
+      textarea:focus,
+      input:focus {
+        box-shadow: 0 0 0 4px rgba(217, 63, 47, 0.18);
+      }
+
+      .actions,
+      .sample-row,
+      .download-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .actions {
+        margin-top: 12px;
+      }
+
+      button,
+      .link-button {
+        border: 2px solid var(--line);
+        background: var(--ink);
+        color: #fff8e8;
+        padding: 10px 14px;
+        box-shadow: 4px 4px 0 var(--line);
+        cursor: pointer;
+        text-decoration: none;
+        transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+      }
+
+      button:hover,
+      .link-button:hover {
+        transform: translate(2px, 2px);
+        box-shadow: 2px 2px 0 var(--line);
+      }
+
+      button:disabled,
+      .link-button.disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+        transform: none;
+        box-shadow: 4px 4px 0 var(--line);
+      }
+
+      .secondary {
+        background: var(--panel);
+        color: var(--ink);
+      }
+
+      .blue {
+        background: var(--blue);
+      }
+
+      .red {
+        background: var(--red);
+      }
+
+      .sample-row {
+        margin-top: 14px;
+      }
+
+      .sample-row button {
+        background: var(--panel);
+        color: var(--ink);
+        padding: 8px 10px;
+        font-size: 14px;
+      }
+
+      .status {
+        min-height: 22px;
+        margin-top: 14px;
+        color: var(--muted);
+        font-family: "Cascadia Mono", "Consolas", monospace;
+        font-size: 13px;
+      }
+
+      .status.ok {
+        color: var(--green);
+      }
+
+      .status.error {
+        color: var(--red);
+      }
+
+      .meter {
+        height: 10px;
+        border: 2px solid var(--line);
+        background: #fffef8;
+        overflow: hidden;
+        margin-top: 12px;
+      }
+
+      .meter span {
+        display: block;
+        width: 0;
+        height: 100%;
+        background: repeating-linear-gradient(90deg, var(--red), var(--red) 12px, var(--amber) 12px, var(--amber) 24px);
+        transition: width 0.2s ease;
+      }
+
+      .result-hero {
+        display: grid;
+        grid-template-columns: 160px minmax(0, 1fr);
+        gap: 14px;
+        align-items: stretch;
+      }
+
+      .cover {
+        min-height: 210px;
+        border: 2px solid var(--line);
+        background:
+          linear-gradient(135deg, rgba(24, 21, 18, 0.08), transparent),
+          #ddd0ba;
+        object-fit: cover;
+        width: 100%;
+        height: 100%;
+      }
+
+      .placeholder {
+        display: grid;
+        place-items: center;
+        min-height: 210px;
+        border: 2px solid var(--line);
+        background: var(--panel-2);
+        color: var(--muted);
+        text-align: center;
+        padding: 12px;
+      }
+
+      .title {
+        margin: 0;
+        font-size: clamp(24px, 3vw, 34px);
+        line-height: 1.1;
+      }
+
+      .meta {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .card {
+        border: 2px solid var(--line);
+        background: #fffef8;
+        padding: 12px;
+        min-width: 0;
+      }
+
+      .value {
+        margin-top: 6px;
+        word-break: break-word;
+        line-height: 1.45;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        border: 2px solid var(--line);
+        padding: 4px 8px;
+        background: var(--green);
+        color: #fff8e8;
+        font-family: "Cascadia Mono", "Consolas", monospace;
+        font-size: 12px;
+      }
+
+      .badge.warn {
+        background: var(--amber);
+      }
+
+      .badge.fail {
+        background: var(--red);
+      }
+
+      .checks {
+        display: grid;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .check {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        border: 2px solid var(--line);
+        background: #fffef8;
+        padding: 10px;
+      }
+
+      .json {
+        max-height: 360px;
+        overflow: auto;
+        border: 2px solid var(--line);
+        background: #15120f;
+        color: #f7ead0;
+        padding: 14px;
+        font-family: "Cascadia Mono", "Consolas", monospace;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .history {
+        display: grid;
+        gap: 10px;
+      }
+
+      .history-item {
+        border: 2px solid var(--line);
+        background: #fffef8;
+        padding: 10px;
+      }
+
+      .history-item button {
+        margin-top: 8px;
+        padding: 7px 9px;
+        font-size: 13px;
+      }
+
+      @media (max-width: 920px) {
+        .masthead,
+        .grid,
+        .result-hero {
+          grid-template-columns: 1fr;
+        }
+
+        .health {
+          box-shadow: 5px 5px 0 var(--line);
+        }
+
+        .meta {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="masthead">
+        <div>
+          <span class="eyebrow">POST /api/parse</span>
+          <h1>抖音解析接口测试台</h1>
+        </div>
+        <div class="health">
+          <strong>Backend</strong>
+          <span id="healthText">等待检测</span>
+        </div>
+      </header>
+
+      <section class="grid">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>输入</h2>
+            <span class="label">URL / 分享文案</span>
+          </div>
+          <div class="panel-body">
+            <textarea id="urlInput" placeholder="粘贴抖音长链、短链或分享文案，例如：https://v.douyin.com/xxxxx/"></textarea>
+            <div class="actions">
+              <button id="parseButton" class="red" type="button">解析接口</button>
+              <button id="clearButton" class="secondary" type="button">清空</button>
+              <button id="healthButton" class="blue" type="button">检测后端</button>
+            </div>
+            <div class="sample-row">
+              <button type="button" data-sample="https://www.douyin.com/video/1234567890123456789">长链样例</button>
+              <button type="button" data-sample="https://v.douyin.com/xxxxxx/">短链样例</button>
+              <button type="button" data-sample="8.52 复制打开抖音，看看这个视频 https://v.douyin.com/xxxxxx/ 09/01">分享文案样例</button>
+            </div>
+            <div id="status" class="status">准备就绪。</div>
+            <div class="meter"><span id="meterBar"></span></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>解析结果</h2>
+            <span id="resultBadge" class="badge warn">未请求</span>
+          </div>
+          <div class="panel-body">
+            <div id="resultHero" class="result-hero">
+              <div class="placeholder">封面图将在解析成功后显示</div>
+              <div>
+                <h2 id="title" class="title">等待解析结果</h2>
+                <div class="meta">
+                  <div class="card">
+                    <span class="label">作者</span>
+                    <div id="author" class="value">-</div>
+                  </div>
+                  <div class="card">
+                    <span class="label">时长</span>
+                    <div id="duration" class="value">-</div>
+                  </div>
+                  <div class="card">
+                    <span class="label">视频源</span>
+                    <div id="videoSource" class="value">-</div>
+                  </div>
+                  <div class="card">
+                    <span class="label">音频</span>
+                    <div id="audioState" class="value">-</div>
+                  </div>
+                </div>
+                <div class="download-row" style="margin-top: 14px;">
+                  <a id="videoDownload" class="link-button disabled" href="#" aria-disabled="true">下载视频</a>
+                  <a id="audioDownload" class="link-button disabled" href="#" aria-disabled="true">下载音频</a>
+                </div>
+              </div>
+            </div>
+
+            <div class="checks" id="checks"></div>
+            <div class="card" style="margin-top: 14px;">
+              <span class="label">Puppeteer 诊断</span>
+              <div id="diagnostics" class="value">尚无诊断数据。</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid" style="margin-top: 18px;">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>原始响应</h2>
+            <span class="label">JSON</span>
+          </div>
+          <div class="panel-body">
+            <pre id="jsonView" class="json">{}</pre>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>最近记录</h2>
+            <span class="label">Local Session</span>
+          </div>
+          <div class="panel-body">
+            <div id="history" class="history"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const urlInput = document.getElementById('urlInput');
+      const parseButton = document.getElementById('parseButton');
+      const clearButton = document.getElementById('clearButton');
+      const healthButton = document.getElementById('healthButton');
+      const statusEl = document.getElementById('status');
+      const meterBar = document.getElementById('meterBar');
+      const healthText = document.getElementById('healthText');
+      const resultBadge = document.getElementById('resultBadge');
+      const resultHero = document.getElementById('resultHero');
+      const titleEl = document.getElementById('title');
+      const authorEl = document.getElementById('author');
+      const durationEl = document.getElementById('duration');
+      const videoSourceEl = document.getElementById('videoSource');
+      const audioStateEl = document.getElementById('audioState');
+      const videoDownload = document.getElementById('videoDownload');
+      const audioDownload = document.getElementById('audioDownload');
+      const checksEl = document.getElementById('checks');
+      const diagnosticsEl = document.getElementById('diagnostics');
+      const jsonView = document.getElementById('jsonView');
+      const historyEl = document.getElementById('history');
+
+      const historyKey = 'douyin-parse-test-history';
+      let currentInput = '';
+      let timer = null;
+
+      function apiUrl(path) {
+        if (window.location.protocol === 'file:' || window.location.port !== '3000') {
+          return `http://localhost:3000${path}`;
+        }
+        return path;
+      }
+
+      function setStatus(message, type = '') {
+        statusEl.textContent = message;
+        statusEl.className = `status${type ? ` ${type}` : ''}`;
+      }
+
+      function setLoading(isLoading) {
+        parseButton.disabled = isLoading;
+        meterBar.style.width = isLoading ? '78%' : '0';
+        if (timer) {
+          clearTimeout(timer);
+        }
+        if (isLoading) {
+          timer = setTimeout(() => {
+            meterBar.style.width = '94%';
+          }, 900);
+        }
+      }
+
+      function formatDuration(ms) {
+        const value = Number(ms);
+        if (!Number.isFinite(value) || value <= 0) {
+          return '-';
+        }
+        const seconds = Math.round(value / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const rest = seconds % 60;
+        return minutes > 0 ? `${minutes}分${rest}秒` : `${seconds}秒`;
+      }
+
+      function safeText(value, fallback = '-') {
+        if (value === null || value === undefined || value === '') {
+          return fallback;
+        }
+        return String(value);
+      }
+
+      function inferVideoSource(data) {
+        if (data.videoSource || data.videoCodec) {
+          return [
+            data.videoSource || data.source || 'unknown',
+            data.videoCodec,
+            data.videoWidth && data.videoHeight ? `${data.videoWidth}x${data.videoHeight}` : ''
+          ].filter(Boolean).join(' / ');
+        }
+
+        if (!data.videoUrl) {
+          return '-';
+        }
+
+        try {
+          const host = new URL(data.videoUrl).hostname;
+          return `${data.source || 'unknown'} / ${host}`;
+        } catch (error) {
+          return data.source || 'unknown';
+        }
+      }
+
+      function setDownloadLink(anchor, enabled, type) {
+        if (!enabled || !currentInput) {
+          anchor.href = '#';
+          anchor.classList.add('disabled');
+          anchor.setAttribute('aria-disabled', 'true');
+          return;
+        }
+
+        anchor.href = apiUrl(`/api/download?type=${type}&url=${encodeURIComponent(currentInput)}`);
+        anchor.classList.remove('disabled');
+        anchor.removeAttribute('aria-disabled');
+      }
+
+      function renderCover(url) {
+        const existing = resultHero.firstElementChild;
+        if (url) {
+          const img = document.createElement('img');
+          img.className = 'cover';
+          img.src = url;
+          img.alt = '视频封面';
+          existing.replaceWith(img);
+          return;
+        }
+
+        const placeholder = document.createElement('div');
+        placeholder.className = 'placeholder';
+        placeholder.textContent = '未返回封面图';
+        existing.replaceWith(placeholder);
+      }
+
+      function renderChecks(data) {
+        const codecKnown = Boolean(data.videoCodec);
+        const h264Compatible = data.videoCodec === 'h264';
+        const checks = [
+          { label: '标题', passed: Boolean(data.title), detail: safeText(data.title, '接口未返回标题') },
+          { label: '封面', passed: Boolean(data.cover), detail: data.cover ? '已返回' : '缺失' },
+          { label: '视频 URL', passed: Boolean(data.videoUrl), detail: data.videoUrl ? '已返回默认视频源' : '缺失' },
+          {
+            label: 'H.264 优先',
+            passed: h264Compatible || !data.videoUrl || !codecKnown,
+            detail: codecKnown ? data.videoCodec : '兜底来源未返回 codec，无法判定'
+          },
+          { label: '音频语义', passed: data.audioReady === true ? data.audioType === 'music' : true, detail: data.audioReady ? safeText(data.audioType) : '无独立音乐/BGM' }
+        ];
+
+        checksEl.innerHTML = '';
+        checks.forEach((item) => {
+          const row = document.createElement('div');
+          row.className = 'check';
+          const left = document.createElement('span');
+          left.textContent = item.label;
+          const right = document.createElement('span');
+          right.className = `badge ${item.passed ? '' : 'fail'}`;
+          right.textContent = item.passed ? '通过' : '失败';
+          row.append(left, right);
+
+          const detail = document.createElement('div');
+          detail.className = 'value';
+          detail.textContent = item.detail;
+          detail.style.gridColumn = '1 / -1';
+
+          const wrapper = document.createElement('div');
+          wrapper.append(row, detail);
+          checksEl.appendChild(wrapper);
+        });
+      }
+
+      function renderDiagnostics(data) {
+        const diagnostics = data.puppeteerDiagnostics;
+        if (!diagnostics) {
+          diagnosticsEl.textContent = data.source && data.source !== 'puppeteer'
+            ? `本次结果来自 ${data.source}，未收到 Puppeteer 诊断。`
+            : '尚无诊断数据。';
+          return;
+        }
+
+        const lines = [
+          `详情接口命中：${diagnostics.detailApiMatched ? '是' : '否'}`,
+          `详情接口有效：${diagnostics.detailApiValid ? '是' : '否'}`,
+          `HTTP 状态：${diagnostics.detailHttpStatus ?? 'n/a'}`,
+          `业务状态码：${diagnostics.detailStatusCode ?? 'n/a'}`,
+          `aweme_detail：${diagnostics.detailHasAweme ? '存在' : '不存在'}`,
+          `goto 耗时：${diagnostics.gotoMs || 0} ms`,
+          `页面兜底：${diagnostics.fallback || 'none'}`,
+          `资源拦截：${diagnostics.blockedRequestCount || 0}`,
+          `拦截异常：${diagnostics.requestInterceptionErrors || 0}`
+        ];
+
+        if (data.fallbackReason) {
+          lines.push(`兜底原因：${data.fallbackReason}`);
+        }
+
+        diagnosticsEl.textContent = lines.join('\n');
+      }
+
+      function renderResult(payload) {
+        const data = payload.data || {};
+        const ok = payload.code === 200 && data && (data.title || data.videoUrl || data.cover);
+
+        resultBadge.textContent = ok ? '解析成功' : '解析失败';
+        resultBadge.className = `badge ${ok ? '' : 'fail'}`;
+        titleEl.textContent = safeText(data.title, '无标题');
+        authorEl.textContent = safeText(data.author);
+        durationEl.textContent = formatDuration(data.duration);
+        videoSourceEl.textContent = inferVideoSource(data);
+        audioStateEl.textContent = data.audioReady ? `${data.audioType || 'music'} 可用` : '无独立音乐/BGM';
+
+        renderCover(data.cover);
+        renderChecks(data);
+        renderDiagnostics(data);
+        jsonView.textContent = JSON.stringify(payload, null, 2);
+        setDownloadLink(videoDownload, Boolean(data.videoUrl), 'video');
+        setDownloadLink(audioDownload, Boolean(data.audioReady && data.audioUrl) || Boolean(data.videoUrl), 'audio');
+        addHistory(currentInput, payload);
+      }
+
+      async function readJsonResponse(response) {
+        const contentType = response.headers.get('content-type') || '';
+        const text = await response.text();
+
+        if (contentType.includes('application/json')) {
+          return JSON.parse(text);
+        }
+
+        const preview = text.replace(/\s+/g, ' ').trim().slice(0, 200);
+        throw new Error(`接口返回非 JSON 响应，HTTP ${response.status}，Content-Type: ${contentType || 'unknown'}，响应片段：${preview || '<empty>'}`);
+      }
+
+      function addHistory(input, payload) {
+        const items = loadHistory();
+        items.unshift({
+          input,
+          title: payload?.data?.title || '未命名记录',
+          time: new Date().toLocaleString()
+        });
+        localStorage.setItem(historyKey, JSON.stringify(items.slice(0, 5)));
+        renderHistory();
+      }
+
+      function loadHistory() {
+        try {
+          return JSON.parse(localStorage.getItem(historyKey) || '[]');
+        } catch (error) {
+          return [];
+        }
+      }
+
+      function renderHistory() {
+        const items = loadHistory();
+        historyEl.innerHTML = '';
+        if (items.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'history-item';
+          empty.textContent = '暂无记录。';
+          historyEl.appendChild(empty);
+          return;
+        }
+
+        items.forEach((item) => {
+          const row = document.createElement('div');
+          row.className = 'history-item';
+          const title = document.createElement('strong');
+          title.textContent = item.title;
+          const time = document.createElement('div');
+          time.className = 'value';
+          time.textContent = item.time;
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'secondary';
+          button.textContent = '再次填入';
+          button.addEventListener('click', () => {
+            urlInput.value = item.input;
+          });
+          row.append(title, time, button);
+          historyEl.appendChild(row);
+        });
+      }
+
+      async function checkHealth() {
+        healthText.textContent = '检测中';
+        try {
+          const response = await fetch(apiUrl('/api/health'));
+          const payload = await readJsonResponse(response);
+          healthText.textContent = payload.code === 200 ? '在线' : '异常';
+        } catch (error) {
+          healthText.textContent = '不可达';
+        }
+      }
+
+      async function parseVideo() {
+        const input = urlInput.value.trim();
+        if (!input) {
+          setStatus('请先输入抖音链接或分享文案。', 'error');
+          return;
+        }
+
+        currentInput = input;
+        setLoading(true);
+        setStatus('正在请求 /api/parse，优先使用 Puppeteer，失败后进入第三方兜底。');
+
+        try {
+          const startedAt = performance.now();
+          const response = await fetch(apiUrl('/api/parse'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ url: input })
+          });
+          const payload = await readJsonResponse(response);
+          const elapsed = Math.round(performance.now() - startedAt);
+
+          renderResult(payload);
+          if (!response.ok || payload.code !== 200) {
+            throw new Error(payload.message || '解析失败');
+          }
+          meterBar.style.width = '100%';
+          setStatus(`解析完成，用时 ${elapsed} ms。`, 'ok');
+        } catch (error) {
+          resultBadge.textContent = '请求失败';
+          resultBadge.className = 'badge fail';
+          jsonView.textContent = JSON.stringify({ error: error.message }, null, 2);
+          setStatus(error.message || '请求失败，请确认后端已启动。', 'error');
+        } finally {
+          setLoading(false);
+        }
+      }
+
+      document.querySelectorAll('[data-sample]').forEach((button) => {
+        button.addEventListener('click', () => {
+          urlInput.value = button.dataset.sample;
+          setStatus('已填入样例，请替换为真实可访问链接。');
+        });
+      });
+
+      parseButton.addEventListener('click', parseVideo);
+      clearButton.addEventListener('click', () => {
+        urlInput.value = '';
+        currentInput = '';
+        setStatus('已清空输入。');
+      });
+      healthButton.addEventListener('click', checkHealth);
+      videoDownload.addEventListener('click', (event) => {
+        if (videoDownload.classList.contains('disabled')) {
+          event.preventDefault();
+        }
+      });
+      audioDownload.addEventListener('click', (event) => {
+        if (audioDownload.classList.contains('disabled')) {
+          event.preventDefault();
+        }
+      });
+
+      renderHistory();
+      checkHealth();
+    </script>
+  </body>
+</html>

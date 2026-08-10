@@ -171,3 +171,244 @@ test('DownloadService.downloadVideo 会清洗分享文案中的链接后再写�
     DownloadService.streamMedia = originalStreamMedia;
   }
 });
+
+test('DownloadService.downloadVideo 日志不输出完整媒体签名 URL', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalStreamMedia = DownloadService.streamMedia;
+  const originalLog = console.log;
+  const logs = [];
+
+  VideoService.getOrParseVideoData = async () => ({
+    title: 'signed-video',
+    videoUrl: 'https://example.com/video.mp4?auth_key=secret&token=secret'
+  });
+  DownloadService.streamMedia = async () => {};
+  console.log = (...args) => logs.push(args.join(' '));
+
+  try {
+    await DownloadService.downloadVideo('https://www.douyin.com/video/1', '', {});
+
+    assert.equal(logs.some((line) => line.includes('https://example.com/video.mp4')), true);
+    assert.equal(logs.some((line) => line.includes('auth_key=secret')), false);
+    assert.equal(logs.some((line) => line.includes('token=secret')), false);
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService.streamMedia = originalStreamMedia;
+    console.log = originalLog;
+  }
+});
+
+test('DownloadService.downloadAudio 日志不输出完整媒体签名 URL', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalStreamMedia = DownloadService.streamMedia;
+  const originalLog = console.log;
+  const logs = [];
+
+  VideoService.getOrParseVideoData = async () => ({
+    title: 'signed-audio',
+    audioReady: true,
+    audioUrl: 'https://example.com/audio.mp3?auth_key=secret&token=secret'
+  });
+  DownloadService.streamMedia = async () => {};
+  console.log = (...args) => logs.push(args.join(' '));
+
+  try {
+    await DownloadService.downloadAudio('https://www.douyin.com/video/1', '', {}, () => {});
+
+    assert.equal(logs.some((line) => line.includes('https://example.com/audio.mp3')), true);
+    assert.equal(logs.some((line) => line.includes('auth_key=secret')), false);
+    assert.equal(logs.some((line) => line.includes('token=secret')), false);
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService.streamMedia = originalStreamMedia;
+    console.log = originalLog;
+  }
+});
+
+test('DownloadService.downloadAudio 在直连音频 403 时强制刷新后重试一次', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalStreamMedia = DownloadService.streamMedia;
+  const parseCalls = [];
+  const streamCalls = [];
+
+  VideoService.getOrParseVideoData = async (url, options = {}) => {
+    parseCalls.push(options);
+    if (options.forceRefresh) {
+      return {
+        title: 'fresh-audio',
+        audioReady: true,
+        audioUrl: 'https://example.com/fresh.mp3'
+      };
+    }
+
+    return {
+      title: 'stale-audio',
+      audioReady: true,
+      audioUrl: 'https://example.com/stale.mp3'
+    };
+  };
+
+  DownloadService.streamMedia = async (...args) => {
+    streamCalls.push(args);
+    if (streamCalls.length === 1) {
+      const error = new Error('forbidden');
+      error.response = { status: 403 };
+      throw error;
+    }
+  };
+
+  try {
+    await DownloadService.downloadAudio('https://www.douyin.com/video/2', '', {}, () => {});
+
+    assert.equal(streamCalls.length, 2);
+    assert.equal(streamCalls[0][0], 'https://example.com/stale.mp3');
+    assert.equal(streamCalls[1][0], 'https://example.com/fresh.mp3');
+    assert.equal(parseCalls.length, 2);
+    assert.equal(parseCalls[1].forceRefresh, true);
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService.streamMedia = originalStreamMedia;
+  }
+});
+
+test('DownloadService.downloadAudio 在直连音频失败时返回业务错误', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalStreamMedia = DownloadService.streamMedia;
+
+  VideoService.getOrParseVideoData = async () => ({
+    title: 'broken-audio',
+    audioReady: true,
+    audioUrl: 'https://example.com/broken.mp3'
+  });
+  DownloadService.streamMedia = async () => {
+    throw new Error('upstream failed');
+  };
+
+  try {
+    await assert.rejects(
+      () => DownloadService.downloadAudio('https://www.douyin.com/video/1', '', {}, () => {}),
+      (error) =>
+        error.message === 'upstream failed' &&
+        error.code === ErrorCodes.DOWNLOAD_RESOURCE_MISSING &&
+        error.isBusiness === true
+    );
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService.streamMedia = originalStreamMedia;
+  }
+});
+
+test('DownloadService.downloadAudio 抽取视频音轨时传递媒体请求头', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalExtractAudioFromUrl = audioExtractor.extractAudioFromUrl;
+  let receivedContext = null;
+
+  VideoService.getOrParseVideoData = async () => ({
+    title: 'extract-audio',
+    audioReady: false,
+    audioUrl: '',
+    videoUrl: 'https://example.com/video.mp4',
+    userAgent: 'Custom UA'
+  });
+  audioExtractor.extractAudioFromUrl = async (url, requestContext) => {
+    receivedContext = requestContext;
+    throw new Error('ffmpeg failed');
+  };
+
+  try {
+    await assert.rejects(
+      () => DownloadService.downloadAudio('https://www.douyin.com/video/1', '', {}, () => {}),
+      (error) =>
+        error.message === 'ffmpeg failed' &&
+        error.code === ErrorCodes.DOWNLOAD_RESOURCE_MISSING &&
+        error.isBusiness === true
+    );
+
+    assert.deepEqual(receivedContext, {
+      headers: {
+        Referer: 'https://www.douyin.com/video/1',
+        Origin: 'https://www.douyin.com',
+        'User-Agent': 'Custom UA'
+      }
+    });
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    audioExtractor.extractAudioFromUrl = originalExtractAudioFromUrl;
+  }
+});
+
+test('DownloadService.downloadAudio 在音频直连失败且有视频时回退抽取音轨', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalStreamMedia = DownloadService.streamMedia;
+  const originalExtractAudioFromUrl = audioExtractor.extractAudioFromUrl;
+  let extractedUrl = null;
+
+  VideoService.getOrParseVideoData = async () => ({
+    title: 'fallback-audio',
+    audioReady: true,
+    audioUrl: 'https://example.com/broken.mp3',
+    videoUrl: 'https://example.com/video.mp4'
+  });
+  DownloadService.streamMedia = async () => {
+    throw new Error('audio cdn failed');
+  };
+  audioExtractor.extractAudioFromUrl = async (url) => {
+    extractedUrl = url;
+    throw new Error('stop after fallback assertion');
+  };
+
+  try {
+    await assert.rejects(
+      () => DownloadService.downloadAudio('https://www.douyin.com/video/1', '', {}, () => {}),
+      (error) =>
+        error.message === 'stop after fallback assertion' &&
+        error.code === ErrorCodes.DOWNLOAD_RESOURCE_MISSING &&
+        error.isBusiness === true
+    );
+
+    assert.equal(extractedUrl, 'https://example.com/video.mp4');
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService.streamMedia = originalStreamMedia;
+    audioExtractor.extractAudioFromUrl = originalExtractAudioFromUrl;
+  }
+});
+
+test('DownloadService.downloadAudio 遇到对象 audioUrl 时不应传给直连下载', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalStreamMedia = DownloadService.streamMedia;
+  const originalExtractAudioFromUrl = audioExtractor.extractAudioFromUrl;
+  let streamCalled = false;
+  let extractedUrl = null;
+
+  VideoService.getOrParseVideoData = async () => ({
+    title: 'object-audio-url',
+    audioReady: true,
+    audioUrl: { url: 'https://example.com/audio.mp3' },
+    videoUrl: 'https://example.com/video.mp4'
+  });
+  DownloadService.streamMedia = async () => {
+    streamCalled = true;
+  };
+  audioExtractor.extractAudioFromUrl = async (url) => {
+    extractedUrl = url;
+    throw new Error('stop after object fallback assertion');
+  };
+
+  try {
+    await assert.rejects(
+      () => DownloadService.downloadAudio('https://www.douyin.com/video/1', '', {}, () => {}),
+      (error) =>
+        error.message === 'stop after object fallback assertion' &&
+        error.code === ErrorCodes.DOWNLOAD_RESOURCE_MISSING &&
+        error.isBusiness === true
+    );
+
+    assert.equal(streamCalled, false);
+    assert.equal(extractedUrl, 'https://example.com/video.mp4');
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService.streamMedia = originalStreamMedia;
+    audioExtractor.extractAudioFromUrl = originalExtractAudioFromUrl;
+  }
+});

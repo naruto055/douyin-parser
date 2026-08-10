@@ -1,5 +1,6 @@
 const axios = require('axios');
 const config = require('../config');
+const { normalizeParseResult } = require('./parseResultNormalizer');
 
 /**
  * 调用新叶接口解析抖音链接。
@@ -118,7 +119,7 @@ function normalizeResponse(data, source) {
 
   // 统一补充音频可用性标识，减少下游业务判断分支。
   result.audioReady = !!result.audioUrl;
-  return result;
+  return normalizeParseResult(result);
 }
 
 /**

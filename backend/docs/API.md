@@ -124,7 +124,18 @@ Content-Type: application/json
     "cover": "https://.../cover.jpg",
     "duration": 15000,
     "videoUrl": "https://.../video.mp4",
+    "videoBackupUrls": ["https://.../video.mp4"],
+    "videoCodec": "h264",
+    "videoFormat": "mp4",
+    "videoWidth": 1080,
+    "videoHeight": 1920,
+    "videoBitRate": 1944887,
+    "videoSource": "play_addr_h264",
+    "videoExpiresAt": 1786082767,
+    "video265Url": "https://.../video-h265.mp4",
     "audioUrl": "https://.../audio.mp3",
+    "audioBackupUrls": ["https://.../audio.mp3"],
+    "audioType": "music",
     "audioReady": true
   }
 }
@@ -133,14 +144,32 @@ Content-Type: application/json
 **响应字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| source | string | 数据来源：`puppeteer` 或第三方 API |
+| source | string | 数据来源：`http_detail`、`puppeteer` 或第三方 API（如 `xinyew`、`jxcxin`、`devtool`） |
 | title | string | 视频标题 |
 | author | string | 作者昵称 |
 | cover | string | 封面图片 URL |
 | duration | number | 视频时长（毫秒） |
-| videoUrl | string | 无水印视频下载链接 |
-| audioUrl | string | 原声音频链接（可选） |
-| audioReady | boolean | 是否有可用的原声音频 |
+| videoUrl | string | 默认兼容的视频下载链接，优先 H.264 MP4 |
+| videoBackupUrls | string[] | 视频备用下载链接（可选） |
+| videoCodec | string | 视频编码，例如 `h264`、`h265`（可选） |
+| videoFormat | string | 视频格式，例如 `mp4`（可选） |
+| videoWidth | number | 视频宽度（可选） |
+| videoHeight | number | 视频高度（可选） |
+| videoBitRate | number | 视频码率（可选） |
+| videoSource | string | 视频来源字段，例如 `play_addr_h264`、`play_addr`、`bit_rate`（可选） |
+| videoExpiresAt | number | 视频 CDN URL 过期时间，Unix 秒（可选） |
+| videoWatermarkRisk | boolean | 视频来源可能带水印时返回 `true`（可选） |
+| video265Url | string | H.265 候选视频链接；默认不作为 `videoUrl`，调用方确认支持 H.265 后再使用（可选） |
+| video265BackupUrls | string[] | H.265 备用链接（可选） |
+| video265Codec | string | H.265 候选编码，通常为 `h265`（可选） |
+| audioUrl | string | 音乐/BGM 音频链接（可选） |
+| audioBackupUrls | string[] | 音乐/BGM 备用链接（可选） |
+| audioType | string | 音频语义类型，当前为 `music` 表示作品音乐/BGM（可选） |
+| audioTitle | string | 音乐/BGM 标题（可选） |
+| audioAuthor | string | 音乐/BGM 作者（可选） |
+| audioReady | boolean | 是否有可用的音乐/BGM 音频 |
+| puppeteerDiagnostics | object | Puppeteer 详情接口命中、状态码、资源拦截等诊断信息（可选） |
+| fallbackReason | string | Puppeteer 失败后进入第三方 API 兜底的原因（可选） |
 
 **错误响应**:
 ```json
@@ -175,7 +204,7 @@ GET /api/download?type=audio&url=https://v.douyin.com/xxxxx/
 #### 缓存机制
 
 - 解析结果基于**视频 ID** 进行缓存
-- 缓存有效期：1 小时（可配置）
+- 缓存有效期：默认 1 小时（可配置），且不会超过视频 CDN URL 过期时间；过近过期的结果不写入缓存
 - 相同视频重复下载时，直接从缓存获取解析结果，无需重新解析
 
 #### 响应

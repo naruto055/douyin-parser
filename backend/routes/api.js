@@ -17,7 +17,8 @@ router.post('/parse', async (req, res, next) => {
   } catch (error) {
     return next(new AppError({
       code: ErrorCodes.PARSE_FAILED,
-      message: error.message || '视频解析失败'
+      message: error.message || '视频解析失败',
+      data: error.data || null
     }));
   }
 });

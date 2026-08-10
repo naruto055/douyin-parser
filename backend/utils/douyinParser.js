@@ -1,6 +1,10 @@
 const axios = require('axios');
 const browserPool = require('./browserPool');
 const thirdPartyAPI = require('./thirdPartyAPI');
+const { normalizeParseResult } = require('./parseResultNormalizer');
+
+const HTTP_DETAIL_TIMEOUT_MS = 2500;
+const HTTP_DETAIL_BASE_URL = 'https://www.douyin.com/aweme/v1/web/aweme/detail/';
 
 /**
  * 从任意文本中提取第一个 URL，并优先返回抖音相关链接。
@@ -58,6 +62,110 @@ function extractVideoId(url) {
   return null;
 }
 
+function buildHttpDetailUrl(awemeId) {
+  const detailUrl = new URL(HTTP_DETAIL_BASE_URL);
+  detailUrl.searchParams.set('aweme_id', awemeId);
+  detailUrl.searchParams.set('aid', '6383');
+  detailUrl.searchParams.set('version_code', '170400');
+  detailUrl.searchParams.set('device_platform', 'webapp');
+  detailUrl.searchParams.set('os', 'windows');
+  detailUrl.searchParams.set('browser_language', 'zh-CN');
+  detailUrl.searchParams.set('browser_platform', 'Win32');
+  detailUrl.searchParams.set('browser_name', 'Chrome');
+  detailUrl.searchParams.set('browser_version', '120.0.0.0');
+  return detailUrl.toString();
+}
+
+async function tryParseWithHttpDetail(url) {
+  const awemeId = extractVideoId(url);
+  if (!awemeId) {
+    return null;
+  }
+
+  try {
+    const response = await axios.get(buildHttpDetailUrl(awemeId), {
+      timeout: HTTP_DETAIL_TIMEOUT_MS,
+      responseType: 'json',
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        Referer: `https://www.douyin.com/video/${awemeId}`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36'
+      }
+    });
+
+    const data = response?.data;
+    if (data && data.status_code === 0 && data.aweme_detail) {
+      const result = extractVideoInfo(data);
+      if (result && (result.title || result.cover || result.videoUrl)) {
+        result.source = 'http_detail';
+        return normalizeParseResult(result);
+      }
+    }
+  } catch (error) {
+    // HTTP 快速路径只做低风险只读尝试，任何失败都交给 Puppeteer 继续解析。
+  }
+
+  return null;
+}
+
+/**
+ * 判断输入链接是否需要执行跳转解析。
+ *
+ * @param {string} url 待判断 URL
+ * @returns {boolean} 是否需要解析跳转
+ */
+function shouldResolveShortUrl(url) {
+  if (!url || extractVideoId(url)) {
+    return false;
+  }
+
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname === 'v.douyin.com' || hostname.endsWith('.douyin.com');
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
+ * 日志中仅保留 URL 定位信息，避免输出签名 query。
+ *
+ * @param {string} url 原始 URL
+ * @returns {string} 脱敏后的 URL
+ */
+function sanitizeUrlForLog(url) {
+  try {
+    const parsedUrl = new URL(url);
+    return `${parsedUrl.origin}${parsedUrl.pathname}`;
+  } catch (error) {
+    return '[invalid-url]';
+  }
+}
+
+/**
+ * 将跳转后的分享页规范化为更适合 Puppeteer 访问的抖音 Web 视频页。
+ *
+ * @param {string} url 解析跳转后的页面地址
+ * @returns {string} 规范化后的页面地址
+ */
+function normalizeDouyinPageUrl(url) {
+  const videoId = extractVideoId(url);
+  if (!videoId) {
+    return url;
+  }
+
+  try {
+    const hostname = new URL(url).hostname;
+    if (hostname === 'www.iesdouyin.com' || hostname === 'iesdouyin.com') {
+      return `https://www.douyin.com/video/${videoId}`;
+    }
+  } catch (error) {
+    return url;
+  }
+
+  return url;
+}
+
 /**
  * 解析抖音短链接的真实跳转地址。
  *
@@ -65,10 +173,14 @@ function extractVideoId(url) {
  * @returns {Promise<string>} 最终跳转后的真实地址
  */
 async function resolveShortUrl(url) {
+  if (!shouldResolveShortUrl(url)) {
+    return url;
+  }
+
   try {
     const response = await axios.head(url, {
       maxRedirects: 5,
-      timeout: 10000
+      timeout: 4000
     });
     return response.request.res.responseUrl || url;
   } catch (error) {
@@ -76,9 +188,158 @@ async function resolveShortUrl(url) {
     if (error.response && error.response.headers && error.response.headers.location) {
       return error.response.headers.location;
     }
-    console.log('Could not resolve short URL, using original:', url);
-    return url;
+
+    try {
+      const response = await axios.get(url, {
+        maxRedirects: 5,
+        timeout: 4000
+      });
+      return response.request.res.responseUrl || url;
+    } catch (getError) {
+      console.log('Could not resolve short URL, using original:', sanitizeUrlForLog(url));
+      return url;
+    }
   }
+}
+
+/**
+ * 获取资源地址列表，统一处理空字段。
+ *
+ * @param {object | null | undefined} playAddr 播放地址对象
+ * @returns {string[]} 可用 URL 列表
+ */
+function normalizeMediaUrl(value) {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (!value || typeof value !== 'object') {
+    return '';
+  }
+
+  const candidates = [
+    value.url,
+    value.uri,
+    value.src,
+    value.main_url,
+    value.play_url,
+    value.download_url
+  ];
+
+  return candidates.find((item) => typeof item === 'string' && item.trim())?.trim() || '';
+}
+
+function getUrlList(playAddr) {
+  if (!Array.isArray(playAddr?.url_list)) {
+    return [];
+  }
+
+  return playAddr.url_list
+    .map(normalizeMediaUrl)
+    .filter(Boolean);
+}
+
+/**
+ * 从多个视频来源中选择当前最适合下载的 MP4 地址。
+ *
+ * @param {object} video 详情接口中的 video 对象
+ * @returns {object | null} 标准化后的视频来源
+ */
+function selectVideoSource(video) {
+  if (!video) return null;
+
+  const h264Urls = getUrlList(video.play_addr_h264);
+  if (h264Urls.length > 0) {
+    return {
+      url: h264Urls[0],
+      backupUrls: h264Urls,
+      codec: 'h264',
+      format: 'mp4',
+      width: video.play_addr_h264?.width || video.width || 0,
+      height: video.play_addr_h264?.height || video.height || 0,
+      bitRate: video.play_addr_h264?.bit_rate || 0,
+      source: 'play_addr_h264'
+    };
+  }
+
+  const playUrls = getUrlList(video.play_addr);
+  if (playUrls.length > 0) {
+    return {
+      url: playUrls[0],
+      backupUrls: playUrls,
+      codec: 'h264',
+      format: 'mp4',
+      width: video.play_addr?.width || video.width || 0,
+      height: video.play_addr?.height || video.height || 0,
+      bitRate: video.play_addr?.bit_rate || 0,
+      source: 'play_addr'
+    };
+  }
+
+  const bestBitRate = Array.isArray(video.bit_rate)
+    ? video.bit_rate
+      .filter((item) => item && item.is_h265 === 0 && getUrlList(item.play_addr).length > 0)
+      .sort((a, b) => {
+        const aPixels = (a.play_addr?.width || 0) * (a.play_addr?.height || 0);
+        const bPixels = (b.play_addr?.width || 0) * (b.play_addr?.height || 0);
+        return bPixels - aPixels || (b.bit_rate || 0) - (a.bit_rate || 0);
+      })[0]
+    : null;
+
+  if (bestBitRate) {
+    const urls = getUrlList(bestBitRate.play_addr);
+    return {
+      url: urls[0],
+      backupUrls: urls,
+      codec: 'h264',
+      format: bestBitRate.format || bestBitRate.play_addr?.data_type || 'mp4',
+      width: bestBitRate.play_addr?.width || 0,
+      height: bestBitRate.play_addr?.height || 0,
+      bitRate: bestBitRate.bit_rate || 0,
+      source: 'bit_rate'
+    };
+  }
+
+  const downloadUrls = getUrlList(video.download_addr);
+  if (downloadUrls.length > 0) {
+    return {
+      url: downloadUrls[0],
+      backupUrls: downloadUrls,
+      codec: 'unknown',
+      format: 'mp4',
+      width: video.download_addr?.width || video.width || 0,
+      height: video.download_addr?.height || video.height || 0,
+      bitRate: video.download_addr?.bit_rate || 0,
+      source: 'download_addr',
+      watermarkRisk: true
+    };
+  }
+
+  return null;
+}
+
+/**
+ * 提取 H.265 候选源；默认不作为 videoUrl，避免兼容性风险。
+ *
+ * @param {object} video 详情接口中的 video 对象
+ * @returns {object | null} H.265 候选来源
+ */
+function selectH265Candidate(video) {
+  const h265Urls = getUrlList(video?.play_addr_265);
+  if (h265Urls.length === 0) {
+    return null;
+  }
+
+  return {
+    url: h265Urls[0],
+    backupUrls: h265Urls,
+    codec: 'h265',
+    format: 'mp4',
+    width: video.play_addr_265?.width || video.width || 0,
+    height: video.play_addr_265?.height || video.height || 0,
+    bitRate: video.play_addr_265?.bit_rate || 0,
+    source: 'play_addr_265'
+  };
 }
 
 /**
@@ -95,23 +356,56 @@ function extractVideoInfo(apiData) {
     source: 'puppeteer'
   };
 
+  if (apiData.__diagnostics) {
+    result.puppeteerDiagnostics = apiData.__diagnostics;
+  }
+
   if (apiData.aweme_detail) {
     const detail = apiData.aweme_detail;
     result.title = detail.desc || '';
     result.author = detail.author?.nickname || '';
     result.cover = detail.video?.cover?.url_list?.[0] || '';
-    result.duration = detail.video?.duration || 0;
+    result.duration = detail.video?.duration || detail.duration || 0;
 
-    if (detail.music && detail.music.play_url && detail.music.play_url.url_list) {
+    const musicUrls = getUrlList(detail.music?.play_url);
+    if (musicUrls.length > 0) {
       // 音频地址存在时直接标记可下载，减少下游重复判断。
-      result.audioUrl = detail.music.play_url.url_list[0];
+      result.audioUrl = musicUrls[0];
+      result.audioBackupUrls = musicUrls;
+      result.audioType = 'music';
+      result.audioTitle = detail.music?.title || '';
+      result.audioAuthor = detail.music?.author || '';
       result.audioReady = true;
     } else {
       result.audioReady = false;
     }
 
-    if (detail.video && detail.video.play_addr && detail.video.play_addr.url_list) {
-      result.videoUrl = detail.video.play_addr.url_list[0];
+    const videoSource = selectVideoSource(detail.video);
+    if (videoSource) {
+      result.videoUrl = videoSource.url;
+      result.videoBackupUrls = videoSource.backupUrls;
+      result.videoCodec = videoSource.codec;
+      result.videoFormat = videoSource.format;
+      result.videoWidth = videoSource.width;
+      result.videoHeight = videoSource.height;
+      result.videoBitRate = videoSource.bitRate;
+      result.videoSource = videoSource.source;
+      result.videoExpiresAt = detail.video?.cdn_url_expired || 0;
+      if (videoSource.watermarkRisk) {
+        result.videoWatermarkRisk = true;
+      }
+    }
+
+    const h265Candidate = selectH265Candidate(detail.video);
+    if (h265Candidate) {
+      result.video265Url = h265Candidate.url;
+      result.video265BackupUrls = h265Candidate.backupUrls;
+      result.video265Codec = h265Candidate.codec;
+      result.video265Format = h265Candidate.format;
+      result.video265Width = h265Candidate.width;
+      result.video265Height = h265Candidate.height;
+      result.video265BitRate = h265Candidate.bitRate;
+      result.video265Source = h265Candidate.source;
     }
   } else if (apiData.title || apiData.cover) {
     result.title = apiData.title || '';
@@ -120,7 +414,7 @@ function extractVideoInfo(apiData) {
     result.audioReady = false;
   }
 
-  return result;
+  return normalizeParseResult(result);
 }
 
 /**
@@ -130,6 +424,7 @@ function extractVideoInfo(apiData) {
  * @returns {Promise<object>} 解析结果
  */
 async function parseWithPuppeteer(url) {
+  const startTime = Date.now();
   try {
     console.log('Parsing with Puppeteer...');
     const apiData = await browserPool.execute(url);
@@ -137,12 +432,15 @@ async function parseWithPuppeteer(url) {
 
     // 至少需要拿到标题或封面之一，才认为结果具备可用价值。
     if (result && (result.title || result.cover)) {
-      console.log('Puppeteer parse succeeded');
-      return result;
+      console.log(`Puppeteer parse succeeded in ${Date.now() - startTime}ms`);
+      return normalizeParseResult(result);
     }
-    throw new Error('Puppeteer parse returned no useful data');
+
+    const error = new Error('Puppeteer parse returned no useful data');
+    error.puppeteerDiagnostics = result?.puppeteerDiagnostics || apiData?.__diagnostics || null;
+    throw error;
   } catch (error) {
-    console.error('Puppeteer parse failed:', error.message);
+    console.error(`Puppeteer parse failed in ${Date.now() - startTime}ms:`, error.message);
     throw error;
   }
 }
@@ -153,51 +451,80 @@ async function parseWithPuppeteer(url) {
  * @param {string} url 用户输入的链接或包含链接的文本
  * @returns {Promise<object>} 归一化后的作品信息
  */
-async function parse(url) {
+async function parse(url, options = {}) {
   if (!url) {
     throw new Error('URL is required');
   }
 
-  console.log('Starting parse for URL:', url);
+  const totalStartTime = Date.now();
+  console.log('Starting parse for URL:', sanitizeUrlForLog(url));
 
   const extractedUrl = extractUrlFromText(url);
   if (extractedUrl && extractedUrl !== url) {
     // 兼容“文案 + 链接”场景，优先提取出真正的 URL。
-    console.log('Extracted URL from text:', extractedUrl);
+    console.log('Extracted URL from text:', sanitizeUrlForLog(extractedUrl));
     url = extractedUrl;
   }
 
-  const realUrl = await resolveShortUrl(url);
-  console.log('Real URL:', realUrl);
+  const shortUrlStartTime = Date.now();
+  const realUrl = options.skipShortUrlResolution ? url : await resolveShortUrl(url);
+  const pageUrl = normalizeDouyinPageUrl(realUrl);
+  const shortUrlLogLabel = options.skipShortUrlResolution ? 'Short URL resolution skipped' : 'Short URL resolution completed';
+  console.log(`${shortUrlLogLabel} in ${Date.now() - shortUrlStartTime}ms`);
+  console.log('Real URL:', sanitizeUrlForLog(realUrl));
+  if (pageUrl !== realUrl) {
+    console.log('Normalized page URL:', sanitizeUrlForLog(pageUrl));
+  }
 
-  let result = null;
+  const httpDetailResult = await tryParseWithHttpDetail(pageUrl);
+  if (httpDetailResult) {
+    console.log(`HTTP detail parse succeeded in ${Date.now() - totalStartTime}ms`);
+    console.log(`Parse completed in ${Date.now() - totalStartTime}ms`);
+    return httpDetailResult;
+  }
 
   try {
-    result = await parseWithPuppeteer(realUrl);
+    const result = await parseWithPuppeteer(pageUrl);
+    console.log(`Parse completed in ${Date.now() - totalStartTime}ms`);
+    return result;
   } catch (error) {
+    const puppeteerDiagnostics = error.puppeteerDiagnostics || null;
+    const puppeteerErrorMessage = error.message || 'Puppeteer parse failed';
     console.log('Puppeteer failed, trying third-party APIs...');
-  }
 
-  if (!result) {
+    const thirdPartyStartTime = Date.now();
     try {
-      // 浏览器解析失败时，再尝试第三方服务作为兜底方案。
-      result = await thirdPartyAPI.parseWithThirdParty(realUrl);
-    } catch (error) {
-      console.error('Third-party APIs also failed');
+      const fallbackResult = await thirdPartyAPI.parseWithThirdParty(pageUrl);
+      if (puppeteerDiagnostics) {
+        fallbackResult.puppeteerDiagnostics = puppeteerDiagnostics;
+      }
+      fallbackResult.fallbackReason = puppeteerErrorMessage;
+      console.log(`Third-party parse completed in ${Date.now() - thirdPartyStartTime}ms`);
+      console.log(`Parse completed in ${Date.now() - totalStartTime}ms`);
+      return normalizeParseResult(fallbackResult);
+    } catch (thirdPartyError) {
+      const parseError = new Error(thirdPartyError.message || puppeteerErrorMessage);
+      parseError.puppeteerDiagnostics = puppeteerDiagnostics;
+      parseError.data = {
+        puppeteerDiagnostics,
+        fallbackReason: puppeteerErrorMessage,
+        thirdPartyError: thirdPartyError.message || 'Third-party parse failed'
+      };
+      console.error(`Third-party APIs also failed in ${Date.now() - thirdPartyStartTime}ms`);
+      throw parseError;
     }
   }
-
-  if (!result) {
-    throw new Error('All parsing methods failed, please check the URL');
-  }
-
-  return result;
 }
 
 module.exports = {
   parse,
   resolveShortUrl,
   extractVideoInfo,
+  selectVideoSource,
+  selectH265Candidate,
+  normalizeDouyinPageUrl,
+  shouldResolveShortUrl,
+  sanitizeUrlForLog,
   extractUrlFromText,
   extractVideoId
 };

@@ -49,3 +49,44 @@ test('解析路由在服务失败时返回业务错误码', async () => {
     VideoService.parseVideo = originalParseVideo;
   }
 });
+
+test('解析路由在服务失败时返回 Puppeteer 诊断数据', async () => {
+  const originalParseVideo = VideoService.parseVideo;
+  const handler = getRouteHandler('/parse', 'post');
+
+  VideoService.parseVideo = async () => {
+    const error = new Error('Puppeteer parse returned no useful data');
+    error.data = {
+      puppeteerDiagnostics: {
+        detailApiMatched: false,
+        detailApiValid: false
+      },
+      fallbackReason: 'Puppeteer parse returned no useful data'
+    };
+    throw error;
+  };
+
+  try {
+    const req = {
+      body: {
+        url: 'https://www.douyin.com/video/123'
+      }
+    };
+    const res = createResponse();
+
+    await handler(req, res, (error) => errorHandler(error, req, res, () => {}));
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.payload.code, ErrorCodes.PARSE_FAILED);
+    assert.equal(res.payload.message, 'Puppeteer parse returned no useful data');
+    assert.deepEqual(res.payload.data, {
+      puppeteerDiagnostics: {
+        detailApiMatched: false,
+        detailApiValid: false
+      },
+      fallbackReason: 'Puppeteer parse returned no useful data'
+    });
+  } finally {
+    VideoService.parseVideo = originalParseVideo;
+  }
+});
