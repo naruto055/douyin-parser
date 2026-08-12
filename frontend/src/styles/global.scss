@@ -73,6 +73,11 @@ page {
   font-weight: 600;
 }
 
+.primary-button[disabled],
+.secondary-button[disabled] {
+  opacity: 0.48;
+}
+
 .secondary-button {
   display: flex;
   align-items: center;

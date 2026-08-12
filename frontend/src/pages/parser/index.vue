@@ -21,6 +21,20 @@ const hasVideo = computed(() => Boolean(result.value?.videoUrl))
 const canDownloadVideo = computed(() => Boolean(result.value?.shareUrl))
 const hasAudio = computed(() => Boolean(result.value?.audioReady))
 const canDownloadAudio = computed(() => Boolean(result.value?.audioReady && result.value.shareUrl))
+const downloadBaseReady = computed(() => hasPublicDownloadBaseUrl())
+const videoMeta = computed(() => {
+  if (!result.value) return '等待解析'
+
+  const items = [
+    result.value.videoCodec || '默认视频',
+    result.value.videoWidth && result.value.videoHeight
+      ? `${result.value.videoWidth}x${result.value.videoHeight}`
+      : '',
+    result.value.videoFormat ? result.value.videoFormat.toUpperCase() : '',
+  ].filter(Boolean)
+
+  return items.join(' · ') || '视频资源'
+})
 
 onMounted(() => {
   if (historyStore.currentResult) {
@@ -115,13 +129,13 @@ function copyShareUrl() {
   <view class="page">
     <view class="page-container">
       <text class="page-title">解析工作台</text>
-      <text class="page-subtitle">一次粘贴链接，同时获取视频、音频和下载入口。</text>
+      <text class="page-subtitle">一次粘贴链接，统一完成解析、复制和下载。</text>
 
       <view class="desktop-grid">
         <UrlInputCard
           v-model="url"
           title="输入链接"
-          description="支持抖音短链接或分享文案，解析成功后会自动保存到本机历史。"
+          description="粘贴抖音链接或分享文案，解析成功后会保存到本机历史。"
           submit-text="开始解析"
           :loading="loading"
           @submit="submit"
@@ -133,16 +147,25 @@ function copyShareUrl() {
           <BaseState v-else-if="!result" title="等待解析" description="视频和音频资源会集中展示在这里。" />
 
           <template v-else>
+            <view class="result-summary">
+              <text class="summary-label">解析完成</text>
+              <text class="summary-title">{{ result.title || '未命名作品' }}</text>
+              <text class="summary-desc">已为你整理好可用资源，选择下方操作即可。</text>
+              <text v-if="!downloadBaseReady" class="summary-warning">
+                当前下载链接暂不可用，请稍后再试。
+              </text>
+            </view>
+
             <ResultCard :result="result" mode="video" />
 
             <view class="resource-card">
               <view class="resource-header">
-                <text class="resource-title">原始链接</text>
+                <text class="resource-title">分享链接</text>
                 <text class="resource-state">可复制</text>
               </view>
-              <text class="resource-desc">用于重新解析、后端下载和跨端分享。</text>
+              <text class="resource-desc">保留原分享内容，方便稍后重新解析。</text>
               <view class="button-row">
-                <button class="secondary-button" @tap="copyShareUrl">复制原始链接</button>
+                <button class="secondary-button" @tap="copyShareUrl">复制分享链接</button>
               </view>
             </view>
 
@@ -152,17 +175,14 @@ function copyShareUrl() {
                 <text class="resource-state">{{ hasVideo ? '可用' : '不可用' }}</text>
               </view>
               <text class="resource-desc">
-                {{ result.videoCodec || '未知编码' }}
-                <template v-if="result.videoWidth && result.videoHeight">
-                  · {{ result.videoWidth }}x{{ result.videoHeight }}
-                </template>
+                {{ videoMeta }}
               </text>
               <view class="button-row">
-                <button class="primary-button" :disabled="!canDownloadVideo" @tap="copyMedia('video')">
-                  复制下载链接
-                </button>
-                <button class="secondary-button" :disabled="!canDownloadVideo" @tap="download('video')">
+                <button class="secondary-button" :disabled="!canDownloadVideo || !downloadBaseReady" @tap="download('video')">
                   下载视频
+                </button>
+                <button class="primary-button" :disabled="!canDownloadVideo || !downloadBaseReady" @tap="copyMedia('video')">
+                  复制视频下载链接
                 </button>
               </view>
             </view>
@@ -173,14 +193,14 @@ function copyShareUrl() {
                 <text class="resource-state">{{ hasAudio ? '可用' : '不可用' }}</text>
               </view>
               <text class="resource-desc">
-                {{ hasAudio ? result.audioTitle || '作品音乐/BGM' : '当前作品未返回可用音频' }}
+                {{ hasAudio ? result.audioTitle || '作品音乐/BGM' : '当前作品未解析到可下载音频' }}
               </text>
               <view class="button-row">
-                <button class="primary-button" :disabled="!canDownloadAudio" @tap="copyMedia('audio')">
-                  复制下载链接
-                </button>
-                <button class="secondary-button" :disabled="!canDownloadAudio" @tap="download('audio')">
+                <button class="secondary-button" :disabled="!canDownloadAudio || !downloadBaseReady" @tap="download('audio')">
                   下载音频
+                </button>
+                <button class="primary-button" :disabled="!canDownloadAudio || !downloadBaseReady" @tap="copyMedia('audio')">
+                  复制音频下载链接
                 </button>
               </view>
             </view>
@@ -192,6 +212,51 @@ function copyShareUrl() {
 </template>
 
 <style scoped lang="scss">
+.result-summary {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 24rpx;
+  padding: 28rpx;
+  border: 1rpx solid #d1fae5;
+  border-radius: 20rpx;
+  background: #f8fffc;
+  color: #111827;
+}
+
+.summary-label {
+  display: block;
+  font-size: 24rpx;
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.summary-title {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 34rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.summary-desc {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 25rpx;
+  line-height: 1.6;
+  color: #6b7280;
+}
+
+.summary-warning {
+  display: block;
+  margin-top: 14rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 14rpx;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
 .resource-card {
   box-sizing: border-box;
   width: 100%;

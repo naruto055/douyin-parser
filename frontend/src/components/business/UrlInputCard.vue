@@ -23,11 +23,21 @@ const emit = defineEmits<{
       class="url-input"
       maxlength="1000"
       auto-height
-      placeholder="粘贴抖音分享链接或分享文案"
+      placeholder="粘贴抖音分享链接，或完整分享文案"
     />
 
-    <button class="primary-button submit-button" :loading="loading" @tap="emit('submit')">
-      {{ loading ? '解析中' : submitText }}
+    <view class="input-footer">
+      <text class="input-tip">支持短链接、长链接和完整分享文案。</text>
+      <text class="input-count">{{ model.length }}/1000</text>
+    </view>
+
+    <button
+      class="primary-button submit-button"
+      :disabled="loading || !model.trim()"
+      :loading="loading"
+      @tap="emit('submit')"
+    >
+      {{ loading ? '解析中...' : submitText }}
     </button>
   </view>
 </template>
@@ -49,5 +59,24 @@ const emit = defineEmits<{
 
 .submit-button {
   margin-top: 24rpx;
+}
+
+.input-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-top: 14rpx;
+}
+
+.input-tip,
+.input-count {
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+.input-count {
+  flex: 0 0 auto;
 }
 </style>
