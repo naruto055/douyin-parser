@@ -1,0 +1,35 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "抖音解析器"
+      }
+    },
+    {
+      "path": "pages/parser/index",
+      "style": {
+        "navigationBarTitleText": "解析工作台"
+      }
+    },
+    {
+      "path": "pages/history/index",
+      "style": {
+        "navigationBarTitleText": "解析历史"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "抖音解析器",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f6f7f9",
+    "backgroundColorContent": "#f6f7f9",
+    "rpxCalcMaxDeviceWidth": 960,
+    "rpxCalcBaseDeviceWidth": 375,
+    "rpxCalcIncludeWidth": 750
+  },
+  "easycom": {
+    "autoscan": true
+  }
+}

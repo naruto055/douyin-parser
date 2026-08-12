@@ -1,0 +1,115 @@
+@use './variables.scss' as vars;
+
+page {
+  min-height: 100%;
+  background: vars.$app-bg;
+  color: vars.$text-main;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 32rpx;
+}
+
+.page-container {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.page-title {
+  display: block;
+  font-size: 48rpx;
+  font-weight: 700;
+  line-height: 1.2;
+  color: $text-main;
+}
+
+.page-subtitle {
+  display: block;
+  margin-top: 16rpx;
+  font-size: 28rpx;
+  line-height: 1.6;
+  color: $text-muted;
+}
+
+.section-card {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 28rpx;
+  padding: 32rpx;
+  border: 1rpx solid vars.$border;
+  border-radius: 24rpx;
+  background: vars.$card-bg;
+  box-shadow: vars.$shadow-card;
+}
+
+.section-title {
+  display: block;
+  font-size: 32rpx;
+  font-weight: 700;
+  color: vars.$text-main;
+}
+
+.section-desc {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 26rpx;
+  line-height: 1.6;
+  color: vars.$text-muted;
+}
+
+.primary-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 88rpx;
+  border-radius: 16rpx;
+  background: vars.$primary;
+  color: #fff;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.secondary-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 88rpx;
+  border: 1rpx solid vars.$border;
+  border-radius: 16rpx;
+  background: #fff;
+  color: vars.$text-main;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.button-row {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  margin-top: 28rpx;
+}
+
+.muted-text {
+  color: vars.$text-muted;
+}
+
+@media screen and (min-width: 768px) {
+  .page {
+    padding: 48rpx;
+  }
+
+  .desktop-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+    gap: 28rpx;
+    align-items: start;
+  }
+
+  .button-row {
+    flex-direction: row;
+  }
+}

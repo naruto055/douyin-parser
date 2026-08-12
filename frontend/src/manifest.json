@@ -1,0 +1,26 @@
+{
+  "name": "douyin-parser",
+  "appid": "__UNI__DOUYIN_PARSER",
+  "description": "抖音视频和音频解析下载工具",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "uniStatistics": {
+    "enable": false
+  },
+  "h5": {
+    "title": "抖音解析器",
+    "router": {
+      "mode": "hash"
+    }
+  },
+  "mp-weixin": {
+    "appid": "",
+    "setting": {
+      "urlCheck": true
+    }
+  },
+  "mp-toutiao": {
+    "appid": ""
+  }
+}
