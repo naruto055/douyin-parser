@@ -1,3 +1,4 @@
+// 先加载环境变量，再读取下面的配置默认值。
 require('dotenv').config();
 
 /**
@@ -165,6 +166,36 @@ module.exports = {
    * - `3600000` 毫秒，即 1 小时。
    */
   cacheTTL: 3600000,
+
+  /**
+   * 短链解析结果缓存有效期，单位为毫秒。
+   *
+   * 作用：
+   * - 只缓存同一个短链的跳转结果，避免重复 HEAD / GET 请求。
+   * - 对“同一链接被反复解析”的场景有效，对新短链本身不提供加速。
+   *
+   * 默认值：
+   * - `600000` 毫秒，即 10 分钟。
+   */
+  shortUrlCacheTTL: Number(process.env.SHORT_URL_CACHE_TTL_MS || 600000),
+
+  /**
+   * HTTP detail 快速路径开关与超时配置。
+   *
+   * 作用：
+   * - 默认关闭，避免无效等待影响主解析链路。
+   * - 开启后仍保持短超时，失败后快速降级到 Puppeteer。
+   *
+   * 设计意图：
+   * - 这是一个可控的试验性快路径，不作为主链路依赖。
+   * - 只有在明确确认页面态和签名条件可用时，才建议临时打开。
+   */
+  httpDetail: {
+    // 默认关闭，避免在生产或常规开发环境里引入额外等待。
+    enabled: process.env.HTTP_DETAIL_ENABLED === 'true',
+    // 保持短超时，让失败尽快回落到 Puppeteer，不阻塞主解析流程。
+    timeoutMs: Number(process.env.HTTP_DETAIL_TIMEOUT_MS || 800)
+  },
 
   rateLimit: {
     /**

@@ -168,7 +168,6 @@ Content-Type: application/json
 | audioTitle | string | 音乐/BGM 标题（可选） |
 | audioAuthor | string | 音乐/BGM 作者（可选） |
 | audioReady | boolean | 是否有可用的音乐/BGM 音频 |
-| puppeteerDiagnostics | object | Puppeteer 详情接口命中、状态码、资源拦截等诊断信息（可选） |
 | fallbackReason | string | Puppeteer 失败后进入第三方 API 兜底的原因（可选） |
 
 **错误响应**:
@@ -481,6 +480,9 @@ async function parseAndDownload(shareUrl) {
 | rateLimit.max | 20 | 窗口内最大请求数 |
 | cacheEnabled | true | 是否启用解析结果缓存 |
 | cacheTTL | 3600000 | 缓存有效期（毫秒，1小时） |
+| shortUrlCacheTTL | 600000 | 短链跳转缓存有效期（毫秒，默认 10 分钟） |
+| httpDetail.enabled | false | HTTP detail 快速路径开关，默认关闭 |
+| httpDetail.timeoutMs | 800 | HTTP detail 快速路径超时（毫秒） |
 
 ### AI 相关配置
 

@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const axios = require('axios');
 
+const config = require('../config');
+const cache = require('../utils/cache');
 const { sanitizeFilename } = require('../utils/stringUtil');
 const { isDirectMediaUrl } = require('../utils/urlValidator');
 const {
@@ -9,15 +11,14 @@ const {
   extractVideoInfo,
   normalizeDouyinPageUrl,
   resolveShortUrl,
+  extractVideoId,
   shouldResolveShortUrl,
   sanitizeUrlForLog
-
 } = require('../utils/douyinParser');
 const browserPool = require('../utils/browserPool');
 const thirdPartyAPI = require('../utils/thirdPartyAPI');
 const { normalizeParseResult } = require('../utils/parseResultNormalizer');
 const {
-  createPuppeteerDiagnostics,
   enableLightweightRequestInterception,
   waitForAwemeDetail
 } = require('../utils/browserPool');
@@ -47,8 +48,18 @@ test('shouldResolveShortUrl 对已包含视频 ID 的长链返回 false', () => 
   assert.equal(shouldResolveShortUrl('https://www.douyin.com/video/1234567890?from=copy'), false);
 });
 
+test('shouldResolveShortUrl 对分享页作品链接返回 false', () => {
+  assert.equal(shouldResolveShortUrl('https://www.iesdouyin.com/share/video/1234567890/'), false);
+});
+
 test('shouldResolveShortUrl 对 v.douyin.com 短链返回 true', () => {
   assert.equal(shouldResolveShortUrl('https://v.douyin.com/abc123/'), true);
+});
+
+test('extractVideoId 应识别 share/video 和 query 参数形式', () => {
+  assert.equal(extractVideoId('https://www.iesdouyin.com/share/video/1234567890/'), '1234567890');
+  assert.equal(extractVideoId('https://www.douyin.com/video/1234567890?aweme_id=1234567890'), '1234567890');
+  assert.equal(extractVideoId('https://www.douyin.com/note/1234567890?item_id=1234567890'), '1234567890');
 });
 
 test('sanitizeUrlForLog 应移除 query 参数', () => {
@@ -111,9 +122,13 @@ test('normalizeParseResult 应保留 Puppeteer 富字段并规范化基础类型
 test('parse 应在 HTTP 详情接口成功时跳过 Puppeteer 并返回统一模型', async () => {
   const originalGet = axios.get;
   const originalExecute = browserPool.execute;
+  const originalHttpDetailEnabled = config.httpDetail.enabled;
+  const originalHttpDetailTimeout = config.httpDetail.timeoutMs;
   let httpCalled = false;
   let puppeteerCalled = false;
 
+  config.httpDetail.enabled = true;
+  config.httpDetail.timeoutMs = 2500;
   axios.get = async (url, options) => {
     httpCalled = true;
     assert.match(url, /aweme_id=1234567890/);
@@ -156,14 +171,18 @@ test('parse 应在 HTTP 详情接口成功时跳过 Puppeteer 并返回统一模
   } finally {
     axios.get = originalGet;
     browserPool.execute = originalExecute;
+    config.httpDetail.enabled = originalHttpDetailEnabled;
+    config.httpDetail.timeoutMs = originalHttpDetailTimeout;
   }
 });
 
 test('parse 应在 HTTP 详情接口失败时降级 Puppeteer', async () => {
   const originalGet = axios.get;
   const originalExecute = browserPool.execute;
+  const originalHttpDetailEnabled = config.httpDetail.enabled;
   let puppeteerCalled = false;
 
+  config.httpDetail.enabled = true;
   axios.get = async () => {
     throw new Error('http detail failed');
   };
@@ -194,6 +213,7 @@ test('parse 应在 HTTP 详情接口失败时降级 Puppeteer', async () => {
   } finally {
     axios.get = originalGet;
     browserPool.execute = originalExecute;
+    config.httpDetail.enabled = originalHttpDetailEnabled;
   }
 });
 
@@ -234,8 +254,10 @@ test('parse 在 Puppeteer 失败后应使用第三方兜底并返回统一模型
   const originalGet = axios.get;
   const originalExecute = browserPool.execute;
   const originalParseWithThirdParty = thirdPartyAPI.parseWithThirdParty;
+  const originalHttpDetailEnabled = config.httpDetail.enabled;
   const diagnostics = { detailApiValid: false, fallback: 'page_meta' };
 
+  config.httpDetail.enabled = true;
   axios.get = async () => {
     throw new Error('http detail failed');
   };
@@ -267,6 +289,7 @@ test('parse 在 Puppeteer 失败后应使用第三方兜底并返回统一模型
     axios.get = originalGet;
     browserPool.execute = originalExecute;
     thirdPartyAPI.parseWithThirdParty = originalParseWithThirdParty;
+    config.httpDetail.enabled = originalHttpDetailEnabled;
   }
 });
 
@@ -274,8 +297,10 @@ test('parse 在 Puppeteer 和第三方均失败时应保留诊断和第三方错
   const originalGet = axios.get;
   const originalExecute = browserPool.execute;
   const originalParseWithThirdParty = thirdPartyAPI.parseWithThirdParty;
+  const originalHttpDetailEnabled = config.httpDetail.enabled;
   const diagnostics = { detailApiValid: false };
 
+  config.httpDetail.enabled = true;
   axios.get = async () => {
     throw new Error('http detail failed');
   };
@@ -305,6 +330,7 @@ test('parse 在 Puppeteer 和第三方均失败时应保留诊断和第三方错
     axios.get = originalGet;
     browserPool.execute = originalExecute;
     thirdPartyAPI.parseWithThirdParty = originalParseWithThirdParty;
+    config.httpDetail.enabled = originalHttpDetailEnabled;
   }
 });
 
@@ -431,6 +457,80 @@ test('resolveShortUrl 对短链使用短超时 HEAD 解析', async () => {
   }
 });
 
+test('resolveShortUrl 对重复短链命中缓存', async () => {
+  const originalHead = axios.head;
+  const originalGet = axios.get;
+  const shortUrl = 'https://v.douyin.com/cache-hit/';
+  let headCalls = 0;
+
+  cache.clear();
+  axios.head = async () => {
+    headCalls += 1;
+    return {
+      request: {
+        res: {
+          responseUrl: 'https://www.douyin.com/video/4455'
+        }
+      }
+    };
+  };
+  axios.get = async () => {
+    throw new Error('缓存命中时不应走 GET');
+  };
+
+  try {
+    assert.equal(await resolveShortUrl(shortUrl), 'https://www.douyin.com/video/4455');
+    assert.equal(await resolveShortUrl(shortUrl), 'https://www.douyin.com/video/4455');
+    assert.equal(headCalls, 1);
+  } finally {
+    cache.clear();
+    axios.head = originalHead;
+    axios.get = originalGet;
+  }
+});
+
+test('resolveShortUrl 短链缓存过期后应重新解析', async () => {
+  const originalHead = axios.head;
+  const originalGet = axios.get;
+  const originalNow = Date.now;
+  const originalTTL = config.shortUrlCacheTTL;
+  const shortUrl = 'https://v.douyin.com/cache-expire/';
+  let headCalls = 0;
+  let now = 1_700_000_000_000;
+
+  cache.clear();
+  config.shortUrlCacheTTL = 1000;
+  Date.now = () => now;
+  axios.head = async () => {
+    headCalls += 1;
+    return {
+      request: {
+        res: {
+          responseUrl: `https://www.douyin.com/video/${headCalls === 1 ? '5566' : '7788'}`
+        }
+      }
+    };
+  };
+  axios.get = async () => {
+    throw new Error('短链缓存命中或 HEAD 成功时不应走 GET');
+  };
+
+  try {
+    assert.equal(await resolveShortUrl(shortUrl), 'https://www.douyin.com/video/5566');
+    now += 999;
+    assert.equal(await resolveShortUrl(shortUrl), 'https://www.douyin.com/video/5566');
+    now += 2;
+    assert.equal(await resolveShortUrl(shortUrl), 'https://www.douyin.com/video/7788');
+    assert.equal(headCalls, 2);
+  } finally {
+    cache.clear();
+    Date.now = originalNow;
+    config.shortUrlCacheTTL = originalTTL;
+    axios.head = originalHead;
+    axios.get = originalGet;
+  }
+});
+
 test('resolveShortUrl 在 HEAD 失败但有 location 时使用跳转地址', async () => {
   const originalHead = axios.head;
   const originalGet = axios.get;
@@ -501,6 +601,35 @@ test('resolveShortUrl 在 HEAD 和 GET 都失败时返回原短链', async () =>
   try {
     assert.equal(await resolveShortUrl(url), url);
   } finally {
+    axios.head = originalHead;
+    axios.get = originalGet;
+  }
+});
+
+test('resolveShortUrl HEAD 和 GET 均失败时不写入缓存', async () => {
+  const originalHead = axios.head;
+  const originalGet = axios.get;
+  const url = 'https://v.douyin.com/fail/';
+  let headCalls = 0;
+  let getCalls = 0;
+
+  cache.clear();
+  axios.head = async () => {
+    headCalls += 1;
+    throw new Error('head failed');
+  };
+  axios.get = async () => {
+    getCalls += 1;
+    throw new Error('get failed');
+  };
+
+  try {
+    assert.equal(await resolveShortUrl(url), url);
+    assert.equal(await resolveShortUrl(url), url);
+    assert.equal(headCalls, 2);
+    assert.equal(getCalls, 2);
+  } finally {
+    cache.clear();
     axios.head = originalHead;
     axios.get = originalGet;
   }
@@ -719,17 +848,24 @@ test('enableLightweightRequestInterception 应吞掉 abort 和 continue 的异�
       throw new Error('continue failed');
     }
   }));
+
+  await assert.doesNotReject(() => handlers.request({
+    resourceType: () => 'stylesheet',
+    abort: async () => {
+      throw new Error('stylesheet should not be blocked');
+    },
+    continue: async () => {}
+  }));
 });
 
-test('waitForAwemeDetail 命中有效详情接口时应返回数据并写入诊断', async () => {
+test('waitForAwemeDetail 命中有效详情接口时应返回数据', async () => {
   const handlers = {};
   const page = {
     on: (eventName, handler) => {
       handlers[eventName] = handler;
     }
   };
-  const diagnostics = createPuppeteerDiagnostics();
-  const waitPromise = waitForAwemeDetail(page, diagnostics);
+  const waitPromise = waitForAwemeDetail(page);
 
   await handlers.response({
     url: () => 'https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=123',
@@ -745,10 +881,4 @@ test('waitForAwemeDetail 命中有效详情接口时应返回数据并写入诊�
   const result = await waitPromise;
 
   assert.equal(result.aweme_detail.desc, 'detail-video');
-  assert.equal(diagnostics.detailApiMatched, true);
-  assert.equal(diagnostics.detailApiValid, true);
-  assert.equal(diagnostics.detailHttpStatus, 200);
-  assert.equal(diagnostics.detailStatusCode, 0);
-  assert.equal(diagnostics.detailHasAweme, true);
-  assert.equal(diagnostics.fallback, 'detail_api');
 });

@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const cache = require('../utils/cache');
 const douyinParser = require('../utils/douyinParser');
+const { createParseTiming, logParseTiming } = require('../utils/parseTiming');
 
 const CDN_CACHE_SAFETY_MARGIN_MS = 60000;
 
@@ -32,11 +33,11 @@ class VideoService {
    * @returns {Promise<object>} 缓存或解析器返回的视频数据。
    */
   static async getOrParseVideoData(url, options = {}) {
-    const totalStartTime = Date.now();
+    const timing = createParseTiming('video-service');
     // 抖音分享文本通常混有标题和链接，先抽取真实 URL 可以让服务层兼容更多输入形态。
     const extractedUrl = douyinParser.extractUrlFromText(url) || url;
+    // 短链解析由工具层统一处理，已包含作品 ID 的链接会在工具内部直接短路返回。
     const shortUrlStartTime = Date.now();
-    // 短链解析属于 I/O 操作，所以使用 await 保证后续 videoId 提取基于最终跳转地址。
     const realUrl = await douyinParser.resolveShortUrl(extractedUrl);
     console.log(`VideoService short URL resolution completed in ${Date.now() - shortUrlStartTime}ms`);
     // videoId 是更稳定的缓存维度；如果解析失败，后面会退回到 URL 哈希作为兜底键。
@@ -47,6 +48,7 @@ class VideoService {
     if (parsedData) {
       // 缓存命中时直接返回，避免重复启动解析链路，减少外部页面变化和网络延迟带来的不确定性。
       console.log(options.cacheHitLogMessage || 'Using cached parsed data for video:', videoId || cacheKey);
+      logParseTiming(timing.snapshot());
       return parsedData;
     }
 
@@ -68,7 +70,7 @@ class VideoService {
     }
 
     // 返回值保持为解析器的原始结果，服务层不额外改形状，避免破坏上层已有契约。
-    console.log(`VideoService parse flow completed in ${Date.now() - totalStartTime}ms`);
+    logParseTiming(timing.snapshot());
     return parsedData;
   }
 

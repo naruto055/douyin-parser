@@ -640,28 +640,19 @@
       }
 
       function renderDiagnostics(data) {
-        const diagnostics = data.puppeteerDiagnostics;
-        if (!diagnostics) {
-          diagnosticsEl.textContent = data.source && data.source !== 'puppeteer'
-            ? `本次结果来自 ${data.source}，未收到 Puppeteer 诊断。`
-            : '尚无诊断数据。';
-          return;
-        }
+        const lines = [];
 
-        const lines = [
-          `详情接口命中：${diagnostics.detailApiMatched ? '是' : '否'}`,
-          `详情接口有效：${diagnostics.detailApiValid ? '是' : '否'}`,
-          `HTTP 状态：${diagnostics.detailHttpStatus ?? 'n/a'}`,
-          `业务状态码：${diagnostics.detailStatusCode ?? 'n/a'}`,
-          `aweme_detail：${diagnostics.detailHasAweme ? '存在' : '不存在'}`,
-          `goto 耗时：${diagnostics.gotoMs || 0} ms`,
-          `页面兜底：${diagnostics.fallback || 'none'}`,
-          `资源拦截：${diagnostics.blockedRequestCount || 0}`,
-          `拦截异常：${diagnostics.requestInterceptionErrors || 0}`
-        ];
+        // 旧版 Puppeteer 细分诊断已收口，这里只展示仍然稳定可用的摘要字段。
+        if (data.source) {
+          lines.push(`数据来源：${data.source}`);
+        }
 
         if (data.fallbackReason) {
           lines.push(`兜底原因：${data.fallbackReason}`);
+        }
+
+        if (lines.length === 0) {
+          lines.push('本版本仅保留总耗时信息。');
         }
 
         diagnosticsEl.textContent = lines.join('\n');

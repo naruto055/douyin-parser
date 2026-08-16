@@ -1,10 +1,13 @@
 const axios = require('axios');
 const browserPool = require('./browserPool');
+const cache = require('./cache');
+const config = require('../config');
 const thirdPartyAPI = require('./thirdPartyAPI');
 const { normalizeParseResult } = require('./parseResultNormalizer');
 
-const HTTP_DETAIL_TIMEOUT_MS = 2500;
 const HTTP_DETAIL_BASE_URL = 'https://www.douyin.com/aweme/v1/web/aweme/detail/';
+// 短链缓存只保存短时间内的跳转结果，避免重复请求同一个分享短链。
+const SHORT_URL_CACHE_PREFIX = 'short-url:';
 
 /**
  * 从任意文本中提取第一个 URL，并优先返回抖音相关链接。
@@ -41,27 +44,48 @@ function extractVideoId(url) {
   if (!url) return null;
 
   try {
+    const parsedUrl = new URL(url);
+    const queryKeys = ['aweme_id', 'video_id', 'item_id', 'item_ids'];
+
+    for (const key of queryKeys) {
+      const value = parsedUrl.searchParams.get(key);
+      if (!value) {
+        continue;
+      }
+
+      const match = value.match(/\d+/);
+      if (match) {
+        return match[0];
+      }
+    }
+
+    const pathMatch = parsedUrl.pathname.match(/\/(?:video|note|share\/video)\/(\d+)/);
+    if (pathMatch && pathMatch[1]) {
+      return pathMatch[1];
+    }
+  } catch (e) {
     const patterns = [
-      /\/video\/(\d+)/,
-      /\/note\/(\d+)/,
-      /video_id=(\d+)/,
-      /item_ids?=(\d+)/
+      /\/(?:video|note|share\/video)\/(\d+)/,
+      /[?&](?:aweme_id|video_id|item_id|item_ids)=(\d+)/
     ];
 
     for (const pattern of patterns) {
       const match = url.match(pattern);
-      // 命中任一已知 URL 结构后立即返回，保持逻辑简单直接。
       if (match && match[1]) {
         return match[1];
       }
     }
-  } catch (e) {
-    console.error('Error extracting video ID:', e);
   }
 
   return null;
 }
 
+/**
+ * 组装 HTTP detail 快速路径请求地址。
+ *
+ * @param {string} awemeId 作品 ID
+ * @returns {string} 可直接请求的详情接口地址
+ */
 function buildHttpDetailUrl(awemeId) {
   const detailUrl = new URL(HTTP_DETAIL_BASE_URL);
   detailUrl.searchParams.set('aweme_id', awemeId);
@@ -77,6 +101,11 @@ function buildHttpDetailUrl(awemeId) {
 }
 
 async function tryParseWithHttpDetail(url) {
+  // 默认关闭，只有显式开启时才允许这个快速路径介入主链路。
+  if (!config.httpDetail.enabled) {
+    return null;
+  }
+
   const awemeId = extractVideoId(url);
   if (!awemeId) {
     return null;
@@ -84,7 +113,7 @@ async function tryParseWithHttpDetail(url) {
 
   try {
     const response = await axios.get(buildHttpDetailUrl(awemeId), {
-      timeout: HTTP_DETAIL_TIMEOUT_MS,
+      timeout: config.httpDetail.timeoutMs,
       responseType: 'json',
       headers: {
         Accept: 'application/json, text/plain, */*',
@@ -177,16 +206,31 @@ async function resolveShortUrl(url) {
     return url;
   }
 
+  const cacheKey = `${SHORT_URL_CACHE_PREFIX}${url}`;
+  // 同一个短链在短时间内重复解析时，直接复用跳转结果。
+  const cachedUrl = cache.get(cacheKey);
+  if (cachedUrl) {
+    return cachedUrl;
+  }
+
   try {
     const response = await axios.head(url, {
       maxRedirects: 5,
       timeout: 4000
     });
-    return response.request.res.responseUrl || url;
+    const resolvedUrl = response.request.res.responseUrl || url;
+    if (resolvedUrl !== url) {
+      cache.set(cacheKey, resolvedUrl, config.shortUrlCacheTTL);
+    }
+    return resolvedUrl;
   } catch (error) {
     // 某些服务端会拒绝 HEAD 请求，但仍会在响应头中带上跳转地址。
     if (error.response && error.response.headers && error.response.headers.location) {
-      return error.response.headers.location;
+      const resolvedUrl = error.response.headers.location;
+      if (resolvedUrl !== url) {
+        cache.set(cacheKey, resolvedUrl, config.shortUrlCacheTTL);
+      }
+      return resolvedUrl;
     }
 
     try {
@@ -194,7 +238,11 @@ async function resolveShortUrl(url) {
         maxRedirects: 5,
         timeout: 4000
       });
-      return response.request.res.responseUrl || url;
+      const resolvedUrl = response.request.res.responseUrl || url;
+      if (resolvedUrl !== url) {
+        cache.set(cacheKey, resolvedUrl, config.shortUrlCacheTTL);
+      }
+      return resolvedUrl;
     } catch (getError) {
       console.log('Could not resolve short URL, using original:', sanitizeUrlForLog(url));
       return url;

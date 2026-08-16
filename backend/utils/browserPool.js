@@ -22,7 +22,7 @@ async function initCluster() {
 
   console.log('Initializing browser pool...');
 
-  const clusterConfig = {
+  clusterInstance = await Cluster.launch({
     concurrency: Cluster.CONCURRENCY_PAGE,
     maxConcurrency: config.browserPool.maxConcurrency,
     puppeteerOptions: {
@@ -40,59 +40,38 @@ async function initCluster() {
     retryLimit: config.browserPool.retryLimit,
     retryDelay: config.browserPool.retryDelay,
     timeout: config.browserPool.timeout
-  };
-
-  clusterInstance = await Cluster.launch(clusterConfig);
+  });
 
   clusterInstance.task(async ({ page, data: url }) => {
-    const diagnostics = createPuppeteerDiagnostics();
-
-    // 伪装为常规浏览器 UA，降低被站点识别为自动化访问的概率。
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
       'AppleWebKit/537.36 (KHTML, like Gecko) ' +
       'Chrome/120.0.0.0 Safari/537.36'
     );
 
-    await enableLightweightRequestInterception(page, diagnostics);
+    await enableLightweightRequestInterception(page);
 
-    const detailResponsePromise = waitForAwemeDetail(page, diagnostics);
-    const gotoStartTime = Date.now();
+    const detailResponsePromise = waitForAwemeDetail(page);
     const pageLoadPromise = page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: config.browserPool.timeout
-    }).then(() => {
-      diagnostics.gotoMs = Date.now() - gotoStartTime;
-      return null;
-    }).catch((error) => {
-      diagnostics.gotoMs = Date.now() - gotoStartTime;
-      diagnostics.gotoError = error.message;
-      return null;
-    });
+    }).catch(() => null);
 
     const apiData = await Promise.race([detailResponsePromise, pageLoadPromise]);
     if (apiData) {
-      attachDiagnostics(apiData, diagnostics);
-      logPuppeteerDiagnostics(diagnostics);
       return apiData;
     }
 
-    // 页面接口响应可能略晚于 DOMContentLoaded，保留短等待窗口后再兜底。
     const delayedApiData = await Promise.race([
       detailResponsePromise,
       page.waitForTimeout(POST_LOAD_DETAIL_WAIT_MS).then(() => null)
     ]);
 
     if (delayedApiData) {
-      attachDiagnostics(delayedApiData, diagnostics);
-      logPuppeteerDiagnostics(diagnostics);
       return delayedApiData;
     }
 
-    diagnostics.fallback = 'page_meta';
-    const pageData = await parseFromPage(page, diagnostics);
-    logPuppeteerDiagnostics(diagnostics);
-    return pageData;
+    return parseFromPage(page);
   });
 
   console.log('Browser pool initialized');
@@ -105,24 +84,16 @@ async function initCluster() {
  * @param {import('puppeteer').Page} page Puppeteer 页面对象
  * @returns {Promise<void>}
  */
-async function enableLightweightRequestInterception(page, diagnostics = null) {
+async function enableLightweightRequestInterception(page) {
   await page.setRequestInterception(true);
   page.on('request', async (request) => {
     try {
-      const resourceType = request.resourceType();
-      if (BLOCKED_RESOURCE_TYPES.has(resourceType)) {
-        if (diagnostics) {
-          diagnostics.blockedRequests[resourceType] += 1;
-          diagnostics.blockedRequestCount += 1;
-        }
+      if (BLOCKED_RESOURCE_TYPES.has(request.resourceType())) {
         await request.abort();
         return;
       }
       await request.continue();
     } catch (error) {
-      if (diagnostics) {
-        diagnostics.requestInterceptionErrors += 1;
-      }
       // 请求可能已被浏览器取消，忽略单个资源失败，避免影响主解析链路。
     }
   });
@@ -134,37 +105,19 @@ async function enableLightweightRequestInterception(page, diagnostics = null) {
  * @param {import('puppeteer').Page} page Puppeteer 页面对象
  * @returns {Promise<any>} 详情接口原始响应
  */
-function waitForAwemeDetail(page, diagnostics = null) {
+function waitForAwemeDetail(page) {
   return new Promise((resolve) => {
     page.on('response', async (response) => {
       if (!response.url().includes(DETAIL_API_PATH)) {
         return;
       }
 
-      if (diagnostics) {
-        diagnostics.detailApiMatched = true;
-        diagnostics.detailHttpStatus = response.status();
-      }
-
       try {
         const apiData = await response.json();
-        if (diagnostics) {
-          diagnostics.detailJsonParsed = true;
-          diagnostics.detailStatusCode = apiData?.status_code ?? null;
-          diagnostics.detailHasAweme = Boolean(apiData?.aweme_detail);
-        }
-
         if (apiData && apiData.status_code === 0 && apiData.aweme_detail) {
-          if (diagnostics) {
-            diagnostics.detailApiValid = true;
-            diagnostics.fallback = 'detail_api';
-          }
           resolve(apiData);
         }
       } catch (e) {
-        if (diagnostics) {
-          diagnostics.detailJsonError = true;
-        }
         // 某些响应可能不是合法 JSON，这里忽略并继续走页面兜底解析。
       }
     });
@@ -177,60 +130,9 @@ function waitForAwemeDetail(page, diagnostics = null) {
  * @param {import('puppeteer').Page} page Puppeteer 页面对象
  * @returns {Promise<{title: string, cover: string, description: string} | null>} 页面解析结果
  */
-function createPuppeteerDiagnostics() {
-  return {
-    detailApiMatched: false,
-    detailApiValid: false,
-    detailHttpStatus: null,
-    detailStatusCode: null,
-    detailHasAweme: false,
-    detailJsonParsed: false,
-    detailJsonError: false,
-    fallback: 'none',
-    gotoMs: 0,
-    gotoError: '',
-    postLoadWaitMs: POST_LOAD_DETAIL_WAIT_MS,
-    blockedRequestCount: 0,
-    blockedRequests: {
-      image: 0,
-      font: 0,
-      media: 0
-    },
-    requestInterceptionErrors: 0,
-    pageMetaTitleFound: false,
-    pageMetaCoverFound: false,
-    pageMetaError: false
-  };
-}
-
-function attachDiagnostics(data, diagnostics) {
-  if (!diagnostics) {
-    return data;
-  }
-
-  const target = data || {};
-  target.__diagnostics = diagnostics;
-  return target;
-}
-
-function logPuppeteerDiagnostics(diagnostics) {
-  console.log(
-    'Puppeteer diagnostics:',
-    `detailMatched=${diagnostics.detailApiMatched}`,
-    `detailValid=${diagnostics.detailApiValid}`,
-    `httpStatus=${diagnostics.detailHttpStatus ?? 'n/a'}`,
-    `statusCode=${diagnostics.detailStatusCode ?? 'n/a'}`,
-    `hasAweme=${diagnostics.detailHasAweme}`,
-    `gotoMs=${diagnostics.gotoMs}`,
-    `fallback=${diagnostics.fallback}`,
-    `blocked=${diagnostics.blockedRequestCount}`,
-    `interceptionErrors=${diagnostics.requestInterceptionErrors}`
-  );
-}
-
-async function parseFromPage(page, diagnostics = null) {
+async function parseFromPage(page) {
   try {
-    const data = await page.evaluate(() => {
+    return await page.evaluate(() => {
       const getMeta = (name) => {
         const el = document.querySelector(`meta[property="${name}"], meta[name="${name}"]`);
         return el ? el.content : '';
@@ -242,20 +144,8 @@ async function parseFromPage(page, diagnostics = null) {
         description: getMeta('og:description')
       };
     });
-
-    if (diagnostics) {
-      diagnostics.pageMetaTitleFound = Boolean(data.title);
-      diagnostics.pageMetaCoverFound = Boolean(data.cover);
-      attachDiagnostics(data, diagnostics);
-    }
-
-    return data;
   } catch (error) {
-    if (diagnostics) {
-      diagnostics.pageMetaError = true;
-    }
-    console.error('Failed to parse from page:', error);
-    return attachDiagnostics(null, diagnostics);
+    return null;
   }
 }
 
@@ -288,6 +178,5 @@ module.exports = {
   execute,
   close,
   enableLightweightRequestInterception,
-  waitForAwemeDetail,
-  createPuppeteerDiagnostics
+  waitForAwemeDetail
 };
