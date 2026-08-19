@@ -19,9 +19,24 @@ const browserPool = require('../utils/browserPool');
 const thirdPartyAPI = require('../utils/thirdPartyAPI');
 const { normalizeParseResult } = require('../utils/parseResultNormalizer');
 const {
+  executeTask,
+  getQueueWaitMs,
   enableLightweightRequestInterception,
   waitForAwemeDetail
 } = require('../utils/browserPool');
+
+test('browserPool 详情接口 post-load 等待窗口应读取配置并提供默认值', () => {
+  assert.equal(
+    config.browserPool.postLoadDetailWaitMs,
+    Number(process.env.POST_LOAD_DETAIL_WAIT_MS || 1200)
+  );
+});
+
+test('getQueueWaitMs 应计算非负排队耗时并处理无效时间戳', () => {
+  assert.equal(getQueueWaitMs(1000, 1450), 450);
+  assert.equal(getQueueWaitMs(2000, 1450), 0);
+  assert.equal(getQueueWaitMs(undefined, 1450), null);
+});
 
 test('sanitizeFilename 应替换非法字符并限制长度', () => {
   const filename = 'a<test>:video?name*' + 'x'.repeat(120);
@@ -881,4 +896,136 @@ test('waitForAwemeDetail 命中有效详情接口时应返回数据', async () =
   const result = await waitPromise;
 
   assert.equal(result.aweme_detail.desc, 'detail-video');
+});
+
+test('executeTask 应使用配置的 post-load 等待窗口并保留排队诊断', async () => {
+  const originalNow = Date.now;
+  const originalWait = config.browserPool.postLoadDetailWaitMs;
+  let configuredWaitMs;
+  const handlers = {};
+  const page = {
+    setUserAgent: async () => {},
+    setRequestInterception: async () => {},
+    on: (eventName, handler) => {
+      handlers[eventName] = handler;
+    },
+    goto: async () => null,
+    waitForTimeout: async (timeoutMs) => {
+      configuredWaitMs = timeoutMs;
+    },
+    evaluate: async () => ({
+      title: 'page-title',
+      cover: 'https://example.com/cover.jpg',
+      description: 'page-description'
+    })
+  };
+
+  Date.now = () => 2000;
+  config.browserPool.postLoadDetailWaitMs = 321;
+
+  try {
+    const result = await executeTask({
+      page,
+      data: {
+        url: 'https://www.douyin.com/video/123',
+        enqueuedAt: 1500
+      }
+    });
+
+    assert.equal(configuredWaitMs, 321);
+    assert.equal(result.title, 'page-title');
+    assert.equal(result.__diagnostics.queueWaitMs, 500);
+    assert.equal(typeof handlers.request, 'function');
+    assert.equal(typeof handlers.response, 'function');
+  } finally {
+    Date.now = originalNow;
+    config.browserPool.postLoadDetailWaitMs = originalWait;
+  }
+});
+
+test('execute 应复用同一个 page worker 并清理任务级监听器', async () => {
+  const puppeteer = require('puppeteer-extra');
+  const originalLaunch = puppeteer.launch;
+  const originalMaxConcurrency = config.browserPool.maxConcurrency;
+  const originalWait = config.browserPool.postLoadDetailWaitMs;
+  await browserPool.close().catch(() => null);
+
+  let newPageCount = 0;
+  let gotoUrls = [];
+  const requestHandlers = new Set();
+  const responseHandlers = new Set();
+
+  const page = {
+    setUserAgent: async () => {},
+    setRequestInterception: async () => {},
+    on: (eventName, handler) => {
+      if (eventName === 'request') {
+        requestHandlers.add(handler);
+      }
+      if (eventName === 'response') {
+        responseHandlers.add(handler);
+      }
+    },
+    off: (eventName, handler) => {
+      if (eventName === 'request') {
+        requestHandlers.delete(handler);
+      }
+      if (eventName === 'response') {
+        responseHandlers.delete(handler);
+      }
+    },
+    goto: async (url) => {
+      gotoUrls.push(url);
+      if (url.includes('/video/')) {
+        for (const handler of responseHandlers) {
+          void handler({
+            url: () => `https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=${url.split('/').pop()}`,
+            status: () => 200,
+            json: async () => ({
+              status_code: 0,
+              aweme_detail: {
+                desc: `detail-${url.split('/').pop()}`
+              }
+            })
+          });
+        }
+      }
+      return null;
+    },
+    waitForTimeout: async () => null,
+    evaluate: async () => ({
+      title: 'page-title',
+      cover: 'https://example.com/cover.jpg',
+      description: 'page-description'
+    }),
+    isClosed: () => false
+  };
+
+  puppeteer.launch = async () => ({
+    newPage: async () => {
+      newPageCount += 1;
+      return page;
+    },
+    close: async () => {},
+    isConnected: () => true
+  });
+  config.browserPool.maxConcurrency = 1;
+  config.browserPool.postLoadDetailWaitMs = 0;
+
+  try {
+    const first = await browserPool.execute('https://www.douyin.com/video/1234567890');
+    const second = await browserPool.execute('https://www.douyin.com/video/9876543210');
+
+    assert.equal(newPageCount, 1);
+    assert.equal(first.__diagnostics.fallback, 'detail_api');
+    assert.equal(second.__diagnostics.fallback, 'detail_api');
+    assert.equal(requestHandlers.size, 0);
+    assert.equal(responseHandlers.size, 0);
+    assert.equal(gotoUrls.filter((url) => url === 'about:blank').length, 2);
+  } finally {
+    puppeteer.launch = originalLaunch;
+    config.browserPool.maxConcurrency = originalMaxConcurrency;
+    config.browserPool.postLoadDetailWaitMs = originalWait;
+    await browserPool.close().catch(() => null);
+  }
 });

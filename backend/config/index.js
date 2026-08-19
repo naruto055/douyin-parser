@@ -79,7 +79,15 @@ module.exports = {
      * - 限制页面打开、脚本执行、资源等待等步骤的最长耗时。
      * - 避免某个卡住的任务长期占用浏览器池资源。
      */
-    timeout: 30000
+    timeout: 30000,
+
+    /**
+     * 页面加载完成后继续等待详情接口的时间，单位为毫秒。
+     *
+     * 详情接口可能在 DOM 加载完成后稍晚返回；保留短暂窗口可以覆盖这类情况，
+     * 同时避免固定等待过久拖慢页面兜底解析。
+     */
+    postLoadDetailWaitMs: Number(process.env.POST_LOAD_DETAIL_WAIT_MS || 1200)
   },
 
   /**
