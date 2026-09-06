@@ -1,8 +1,8 @@
-# 抖音解析器 API 文档
+# 多平台视频解析器 API 文档
 
 ## 概述
 
-抖音解析器后端提供 RESTful API，用于解析抖音视频链接并下载视频/音频内容。
+视频解析器后端提供 RESTful API，用于解析抖音、Bilibili 普通公开视频链接并下载视频/音频内容。
 
 **基础地址**: `http://localhost:3000`
 
@@ -93,9 +93,9 @@ GET /api/health
 
 ---
 
-### 2. 解析抖音链接
+### 2. 解析视频链接
 
-解析抖音视频 URL，获取视频信息（标题、作者、封面、视频链接、音频链接等）。
+解析视频 URL，获取视频信息（标题、作者、封面、视频链接、音频链接等）。当前支持抖音视频链接和 Bilibili 普通公开视频链接。
 
 **请求**:
 ```
@@ -103,14 +103,14 @@ POST /api/parse
 Content-Type: application/json
 
 {
-  "url": "https://v.douyin.com/xxxxx/"
+  "url": "https://www.bilibili.com/video/BV1TF8G6oERL/"
 }
 ```
 
 **参数**:
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| url | string | 是 | 抖音视频链接（支持短链接） |
+| url | string | 是 | 抖音视频链接（支持短链接）或 Bilibili 普通视频页链接（支持 `b23.tv` 短链接） |
 
 **响应示例**:
 ```json
@@ -119,6 +119,7 @@ Content-Type: application/json
   "message": "success",
   "data": {
     "source": "puppeteer",
+    "platform": "douyin",
     "title": "视频标题",
     "author": "作者昵称",
     "cover": "https://.../cover.jpg",
@@ -144,7 +145,11 @@ Content-Type: application/json
 **响应字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| source | string | 数据来源：`http_detail`、`puppeteer` 或第三方 API（如 `xinyew`、`jxcxin`、`devtool`） |
+| platform | string | 平台标识：`douyin` 或 `bilibili` |
+| source | string | 数据来源：`http_detail`、`puppeteer`、`bilibili_playurl` 或第三方 API（如 `xinyew`、`jxcxin`、`devtool`） |
+| shareUrl | string | 规范化后的平台页面 URL（可选） |
+| referer | string | 下载媒体资源时需要使用的 Referer（可选） |
+| userAgent | string | 下载媒体资源时建议使用的 User-Agent（可选） |
 | title | string | 视频标题 |
 | author | string | 作者昵称 |
 | cover | string | 封面图片 URL |
@@ -159,6 +164,7 @@ Content-Type: application/json
 | videoSource | string | 视频来源字段，例如 `play_addr_h264`、`play_addr`、`bit_rate`（可选） |
 | videoExpiresAt | number | 视频 CDN URL 过期时间，Unix 秒（可选） |
 | videoWatermarkRisk | boolean | 视频来源可能带水印时返回 `true`（可选） |
+| videoMimeType | string | 视频流 MIME 类型；Bilibili 常见为 `video/mp4`（可选） |
 | video265Url | string | H.265 候选视频链接；默认不作为 `videoUrl`，调用方确认支持 H.265 后再使用（可选） |
 | video265BackupUrls | string[] | H.265 备用链接（可选） |
 | video265Codec | string | H.265 候选编码，通常为 `h265`（可选） |
@@ -168,7 +174,25 @@ Content-Type: application/json
 | audioTitle | string | 音乐/BGM 标题（可选） |
 | audioAuthor | string | 音乐/BGM 作者（可选） |
 | audioReady | boolean | 是否有可用的音乐/BGM 音频 |
+| audioMimeType | string | 音频流 MIME 类型；Bilibili 常见为 `audio/mp4`（可选） |
+| audioFormat | string | 音频下载扩展名；Bilibili 常见为 `m4a`（可选） |
+| requiresMuxing | boolean | 是否需要服务端合并音视频流；Bilibili DASH 视频通常为 `true` |
+| bilibili | object | Bilibili 专属元数据（可选） |
+| bilibili.bvid | string | Bilibili 视频 BV 号（可选） |
+| bilibili.aid | number | Bilibili 视频 aid（可选） |
+| bilibili.cid | number | 当前解析分 P 的 cid（可选） |
+| bilibili.page | number | 当前解析分 P 的页码，默认第 1 P（可选） |
+| bilibili.part | string | 当前分 P 标题（可选） |
+| bilibili.quality | number | 播放接口返回的清晰度标识（可选） |
+| puppeteerDiagnostics | object | 抖音 Puppeteer 解析诊断信息（可选） |
 | fallbackReason | string | Puppeteer 失败后进入第三方 API 兜底的原因（可选） |
+
+**Bilibili 说明**:
+- 第一版支持未登录即可访问的普通公开视频，默认解析第 1 P。
+- 支持 `b23.tv` 短链接跳转解析，短链跳转结果会按配置短期缓存。
+- Bilibili 播放流来自 DASH，`videoUrl` 和 `audioUrl` 通常是分离的临时 CDN URL。
+- Bilibili 视频下载会在服务端使用 FFmpeg 合并视频流和音频流，返回带声音的 `.mp4` 文件。
+- 若接口没有返回可用音频流，Bilibili 解析/视频下载会失败，不会返回无声 video-only 文件。
 
 **错误响应**:
 ```json
@@ -183,32 +207,34 @@ Content-Type: application/json
 
 ### 3. 下载视频/音频
 
-下载视频或提取音频。直接传入抖音分享链接，接口会自动解析并下载。已解析过的视频会从缓存获取，无需重复解析。
+下载视频或提取音频。直接传入平台视频页链接，接口会自动解析并下载。已解析过的视频会从缓存获取，无需重复解析。
 
 **请求**:
 ```
 GET /api/download?type=video&url=https://v.douyin.com/xxxxx/
 GET /api/download?type=audio&url=https://v.douyin.com/xxxxx/
+GET /api/download?type=video&url=https://www.bilibili.com/video/BV1TF8G6oERL/
+GET /api/download?type=audio&url=https://www.bilibili.com/video/BV1TF8G6oERL/
 ```
 
 **查询参数**:
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | type | string | 是 | 下载类型：`video` 或 `audio` |
-| url | string | 是 | 抖音视频分享链接（支持短链接） |
+| url | string | 是 | 抖音视频分享链接（支持短链接）或 Bilibili 普通视频页链接（支持 `b23.tv` 短链接） |
 | title | string | 否 | 文件名（不含扩展名），默认使用视频标题 |
 
-**注意**: 接口只接受抖音页面 URL，不接受直接的媒体文件链接（如 .mp3、.mp4 等）。
+**注意**: 接口只接受平台页面 URL，不接受直接的媒体文件链接（如 .mp3、.mp4、.m4a 等）。Bilibili `type=video` 会合并 DASH 视频流和音频流后返回 `.mp4`；`type=audio` 优先返回 DASH 音频流对应的 `.m4a`。
 
 #### 缓存机制
 
-- 解析结果基于**视频 ID** 进行缓存
+- 解析结果基于**平台 + 视频 ID** 进行缓存
 - 缓存有效期：默认 1 小时（可配置），且不会超过视频 CDN URL 过期时间；过近过期的结果不写入缓存
 - 相同视频重复下载时，直接从缓存获取解析结果，无需重新解析
 
 #### 响应
 
-- 成功：返回文件流（`video/mp4` 或 `audio/mpeg`）
+- 成功：返回文件流。视频为 `video/mp4`；抖音音频通常为 `audio/mpeg`；Bilibili DASH 音频为 `audio/mp4`（`.m4a`）
 - 失败：返回 JSON 错误信息
 
 **错误响应示例**:
@@ -225,7 +251,7 @@ GET /api/download?type=audio&url=https://v.douyin.com/xxxxx/
 ```json
 {
   "code": 400,
-  "message": "Invalid URL type. Please provide a Douyin video page URL, not a direct media file URL.",
+  "message": "Invalid URL type. Please provide a supported platform video page URL, not a direct media file URL.",
   "data": null
 }
 ```
@@ -481,6 +507,8 @@ async function parseAndDownload(shareUrl) {
 | cacheEnabled | true | 是否启用解析结果缓存 |
 | cacheTTL | 3600000 | 缓存有效期（毫秒，1小时） |
 | shortUrlCacheTTL | 600000 | 短链跳转缓存有效期（毫秒，默认 10 分钟） |
+| bilibiliDownload.maxMediaBytes | 524288000 | Bilibili DASH 单个临时媒体流最大下载字节数 |
+| bilibiliDownload.maxMuxConcurrency | 1 | Bilibili FFmpeg 合并并发数 |
 | httpDetail.enabled | false | HTTP detail 快速路径开关，默认关闭 |
 | httpDetail.timeoutMs | 800 | HTTP detail 快速路径超时（毫秒） |
 
