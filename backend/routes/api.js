@@ -31,7 +31,7 @@ router.get('/download', async (req, res, next) => {
       return response.fail(
         res,
         ErrorCodes.VALIDATION_ERROR,
-        'Invalid URL type. Please provide a Douyin video page URL, not a direct media file URL.',
+        'Invalid URL type. Please provide a supported platform video page URL, not a direct media file URL.',
         null,
         400
       );

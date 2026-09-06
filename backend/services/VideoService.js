@@ -2,6 +2,7 @@ const crypto = require('crypto');
 
 const config = require('../config');
 const cache = require('../utils/cache');
+const bilibiliParser = require('../utils/bilibiliParser');
 const douyinParser = require('../utils/douyinParser');
 const { createParseTiming, logParseTiming } = require('../utils/parseTiming');
 
@@ -9,7 +10,7 @@ const CDN_CACHE_SAFETY_MARGIN_MS = 60000;
 
 class VideoService {
   /**
-   * 解析单个抖音视频地址，并复用统一的解析与缓存流程。
+   * 解析单个视频地址，并复用统一的解析与缓存流程。
    *
    * @param {string} url 用户提交的视频地址或包含视频地址的分享文本。
    * @returns {Promise<object>} 解析器返回的视频数据。
@@ -34,15 +35,17 @@ class VideoService {
    */
   static async getOrParseVideoData(url, options = {}) {
     const timing = createParseTiming('video-service');
-    // 抖音分享文本通常混有标题和链接，先抽取真实 URL 可以让服务层兼容更多输入形态。
-    const extractedUrl = douyinParser.extractUrlFromText(url) || url;
-    // 短链解析由工具层统一处理，已包含作品 ID 的链接会在工具内部直接短路返回。
+    // 用平台上下文把“识别、短链展开、解析”三步统一起来，避免服务层写死某个平台。
+    const parserContext = this._resolveParserContext(url);
+    // 分享文本通常混有标题和链接，先抽取真实 URL 可以让服务层兼容更多输入形态。
+    const extractedUrl = parserContext.extractUrlFromText(url) || url;
+    // 短链解析由平台工具层统一处理，已包含作品 ID 的链接会在工具内部直接短路返回。
     const shortUrlStartTime = Date.now();
-    const realUrl = await douyinParser.resolveShortUrl(extractedUrl);
+    const realUrl = await parserContext.resolveShortUrl(extractedUrl);
     console.log(`VideoService short URL resolution completed in ${Date.now() - shortUrlStartTime}ms`);
     // videoId 是更稳定的缓存维度；如果解析失败，后面会退回到 URL 哈希作为兜底键。
-    const videoId = douyinParser.extractVideoId(realUrl);
-    const cacheKey = this._generateCacheKey(videoId, realUrl);
+    const videoId = parserContext.extractVideoId(realUrl);
+    const cacheKey = this._generateCacheKey(videoId, realUrl, parserContext.platform);
 
     let parsedData = options.forceRefresh ? null : cache.get(cacheKey);
     if (parsedData) {
@@ -54,12 +57,12 @@ class VideoService {
 
     if (options.parseLogLabel === 'download') {
       // 下载场景单独打日志，便于排查“解析成功但下载失败”和“解析阶段失败”的边界。
-      console.log('Parsing URL for download:', douyinParser.sanitizeUrlForLog(realUrl));
+      console.log('Parsing URL for download:', parserContext.sanitizeUrlForLog(realUrl));
     }
 
     // parseInput 允许调用方保留原始输入；默认使用 realUrl，确保普通解析路径基于规范化后的地址。
     const parseStartTime = Date.now();
-    parsedData = await douyinParser.parse(options.parseInput || realUrl, {
+    parsedData = await parserContext.parse(options.parseInput || realUrl, {
       skipShortUrlResolution: !options.parseInput
     });
     console.log(`VideoService parser completed in ${Date.now() - parseStartTime}ms`);
@@ -75,15 +78,40 @@ class VideoService {
   }
 
   /**
-   * 根据视频 ID 或 URL 生成缓存键。
+   * 根据平台、视频 ID 或 URL 生成缓存键。
    *
    * @param {string|null|undefined} videoId 从真实地址中提取到的视频 ID，存在时优先作为缓存键。
    * @param {string} url 真实视频地址；当 videoId 不可用时用于生成哈希缓存键。
    * @returns {string} 可用于缓存读写的稳定键。
    */
-  static _generateCacheKey(videoId, url) {
+  static _generateCacheKey(videoId, url, platform = 'douyin') {
     // 优先使用业务 ID；没有 ID 时使用 md5 生成短且稳定的键，避免原始 URL 过长影响缓存存取。
-    return videoId || crypto.createHash('md5').update(url).digest('hex');
+    const stableId = videoId || crypto.createHash('md5').update(url).digest('hex');
+    // 平台前缀必须带上，否则不同平台的同名 ID 会互相污染缓存。
+    return `${platform}:${stableId}`;
+  }
+
+  static _resolveParserContext(input) {
+    // 先判定是否是 B 站输入，再选择对应的解析器和短链处理逻辑。
+    if (bilibiliParser.isBilibiliUrl(input)) {
+      return {
+        platform: 'bilibili',
+        parse: (url) => bilibiliParser.parse(url),
+        resolveShortUrl: bilibiliParser.resolveShortUrl,
+        extractUrlFromText: bilibiliParser.extractUrlFromText,
+        extractVideoId: bilibiliParser.extractBvid,
+        sanitizeUrlForLog: douyinParser.sanitizeUrlForLog
+      };
+    }
+
+    return {
+      platform: 'douyin',
+      parse: douyinParser.parse,
+      resolveShortUrl: douyinParser.resolveShortUrl,
+      extractUrlFromText: douyinParser.extractUrlFromText,
+      extractVideoId: douyinParser.extractVideoId,
+      sanitizeUrlForLog: douyinParser.sanitizeUrlForLog
+    };
   }
 
   /**

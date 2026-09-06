@@ -87,6 +87,55 @@ async function extractAudio(videoUrl, outputPath, requestContext = {}) {
   });
 }
 
+async function mergeVideoAndAudio(videoPath, audioPath, outputPath, options = {}) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.setFfmpegPath(resolveFfmpegPath());
+    let settled = false;
+    const command = ffmpeg()
+      .input(videoPath)
+      .input(audioPath)
+      // B 站 DASH 已经提供可用编码，合并时只重新封装，避免额外转码开销。
+      .outputOptions(['-c copy', '-movflags +faststart'])
+      .on('start', (cmd) => {
+        console.log('FFmpeg mux command started:', cmd);
+      })
+      .on('end', () => {
+        console.log('FFmpeg mux completed');
+        settled = true;
+        if (options.signal) {
+          options.signal.removeEventListener('abort', abortHandler);
+        }
+        resolve(outputPath);
+      })
+      .on('error', (err) => {
+        console.error('FFmpeg mux failed:', err);
+        settled = true;
+        if (options.signal) {
+          options.signal.removeEventListener('abort', abortHandler);
+        }
+        reject(err);
+      })
+      .save(outputPath);
+
+    const abortHandler = () => {
+      if (settled) return;
+      const error = new Error('FFmpeg mux aborted');
+      error.code = 'ABORT_ERR';
+      // 只要上层请求取消，立即杀掉 FFmpeg，避免后台继续占用 CPU。
+      command.kill('SIGKILL');
+      reject(error);
+    };
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        abortHandler();
+        return;
+      }
+      options.signal.addEventListener('abort', abortHandler, { once: true });
+    }
+  });
+}
+
 /**
  * 从视频地址提取音频，并生成唯一的临时文件名。
  *
@@ -161,6 +210,7 @@ if (typeof cleanupTimer.unref === 'function') {
 module.exports = {
   extractAudio,
   extractAudioFromUrl,
+  mergeVideoAndAudio,
   cleanupOldFiles,
   ensureTempDir
 };

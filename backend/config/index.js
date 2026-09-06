@@ -187,6 +187,28 @@ module.exports = {
    */
   shortUrlCacheTTL: Number(process.env.SHORT_URL_CACHE_TTL_MS || 600000),
 
+  bilibiliDownload: {
+    /**
+     * 单个 Bilibili DASH 临时媒体流允许下载的最大字节数。
+     *
+     * 作用：
+     * - 视频合并前会分别下载视频流和音频流。
+     * - 通过 Content-Length 预检和流式计数保护磁盘空间。
+     * - 该值限制单条媒体流，不是最终 MP4 文件大小。
+     */
+    maxMediaBytes: Number(process.env.BILIBILI_MAX_MEDIA_BYTES || 524288000),
+
+    /**
+     * 同时允许执行的 Bilibili FFmpeg 合并任务数。
+     *
+     * 作用：
+     * - FFmpeg 合并会占用 CPU 与磁盘 IO。
+     * - 默认限制为 1，避免长视频并发下载压垮本机。
+     * - 等待中的请求会排队，不会绕过限制直接启动 FFmpeg。
+     */
+    maxMuxConcurrency: Number(process.env.BILIBILI_MAX_MUX_CONCURRENCY || 1)
+  },
+
   /**
    * HTTP detail 快速路径开关与超时配置。
    *

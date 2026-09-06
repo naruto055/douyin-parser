@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const VideoService = require('../services/VideoService');
 const cache = require('../utils/cache');
+const bilibiliParser = require('../utils/bilibiliParser');
 const douyinParser = require('../utils/douyinParser');
 
 test('VideoService.parseVideo 在缓存命中时直接返回缓存数据', async () => {
@@ -52,7 +53,7 @@ test('VideoService.getOrParseVideoData 在缓存未命中时写入缓存', async
 
     assert.equal(result.title, 'parsed-video');
     assert.equal(cacheWrites.length, 1);
-    assert.equal(cacheWrites[0].key, '456');
+    assert.equal(cacheWrites[0].key, 'douyin:456');
     assert.equal(typeof cacheWrites[0].ttl, 'number');
   } finally {
     cache.get = originalGet;
@@ -63,6 +64,72 @@ test('VideoService.getOrParseVideoData 在缓存未命中时写入缓存', async
     douyinParser.parse = originalParse;
   }
 });
+
+test('VideoService.parseVideo 支持 B 站平台分发和平台缓存键', async () => {
+  const originalGet = cache.get;
+  const originalSet = cache.set;
+  const originalParse = bilibiliParser.parse;
+
+  const cacheWrites = [];
+  let parseInput = null;
+  cache.get = () => null;
+  cache.set = (key, value, ttl) => cacheWrites.push({ key, value, ttl });
+  bilibiliParser.parse = async (url) => {
+    parseInput = url;
+    return {
+      platform: 'bilibili',
+      title: 'bilibili-video'
+    };
+  };
+
+  try {
+    const result = await VideoService.parseVideo('https://www.bilibili.com/video/BV1TF8G6oERL/');
+
+    assert.equal(result.title, 'bilibili-video');
+    assert.equal(parseInput, 'https://www.bilibili.com/video/BV1TF8G6oERL/');
+    assert.equal(cacheWrites.length, 1);
+    assert.equal(cacheWrites[0].key, 'bilibili:BV1TF8G6oERL');
+  } finally {
+    cache.get = originalGet;
+    cache.set = originalSet;
+    bilibiliParser.parse = originalParse;
+  }
+});
+
+test('VideoService.parseVideo 会解析 B 站 b23.tv 短链后再提取缓存键', async () => {
+  const originalGet = cache.get;
+  const originalSet = cache.set;
+  const originalParse = bilibiliParser.parse;
+  const originalResolveShortUrl = bilibiliParser.resolveShortUrl;
+
+  const cacheWrites = [];
+  let parseInput = null;
+  cache.get = () => null;
+  cache.set = (key, value, ttl) => cacheWrites.push({ key, value, ttl });
+  bilibiliParser.resolveShortUrl = async () => 'https://www.bilibili.com/video/BV1TF8G6oERL/';
+  bilibiliParser.parse = async (url) => {
+    parseInput = url;
+    return {
+      platform: 'bilibili',
+      title: 'short-bilibili-video'
+    };
+  };
+
+  try {
+    const result = await VideoService.parseVideo('https://b23.tv/abc123');
+
+    assert.equal(result.title, 'short-bilibili-video');
+    assert.equal(parseInput, 'https://www.bilibili.com/video/BV1TF8G6oERL/');
+    assert.equal(cacheWrites.length, 1);
+    assert.equal(cacheWrites[0].key, 'bilibili:BV1TF8G6oERL');
+  } finally {
+    cache.get = originalGet;
+    cache.set = originalSet;
+    bilibiliParser.parse = originalParse;
+    bilibiliParser.resolveShortUrl = originalResolveShortUrl;
+  }
+});
+
 
 test('VideoService.parseVideo 在缓存未命中时使用真实地址解析', async () => {
   const originalGet = cache.get;

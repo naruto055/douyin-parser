@@ -1,9 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('events');
+const { Readable } = require('stream');
 
+const axios = require('axios');
 const DownloadService = require('../services/DownloadService');
 const VideoService = require('../services/VideoService');
 const audioExtractor = require('../utils/audioExtractor');
+const config = require('../config');
 const ErrorCodes = require('../errors/errorCodes');
 
 test('DownloadService.downloadVideo 使用解析结果标题生成文件名', async () => {
@@ -93,6 +97,350 @@ test('DownloadService.downloadAudio 在无可用媒体地址时抛出 400 错误
     );
   } finally {
     VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+  }
+});
+
+test('DownloadService.downloadVideo 对 B 站 DASH 流触发音视频合并', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalDownloadTempMedia = DownloadService._downloadTempMedia;
+  const originalBuildTempFilePath = DownloadService._buildTempFilePath;
+  const originalStreamLocalFile = DownloadService._streamLocalFile;
+  const originalRemoveFileIfExists = DownloadService._removeFileIfExists;
+  const originalMergeVideoAndAudio = audioExtractor.mergeVideoAndAudio;
+
+  const downloadedUrls = [];
+  const removedFiles = [];
+  let mergeArgs = null;
+  let streamArgs = null;
+  let startedDownloads = 0;
+  let maxConcurrentDownloads = 0;
+  let releaseDownloads;
+  const downloadsReleased = new Promise((resolve) => {
+    releaseDownloads = resolve;
+  });
+
+  VideoService.getOrParseVideoData = async () => ({
+    platform: 'bilibili',
+    title: 'bili:title',
+    videoUrl: 'https://example.com/video.m4s',
+    audioUrl: 'https://example.com/audio.m4s',
+    requiresMuxing: true,
+    referer: 'https://www.bilibili.com/video/BV1TF8G6oERL/',
+    userAgent: 'Bili UA'
+  });
+  DownloadService._downloadTempMedia = async (url) => {
+    downloadedUrls.push(url);
+    startedDownloads += 1;
+    maxConcurrentDownloads = Math.max(maxConcurrentDownloads, startedDownloads);
+    if (startedDownloads === 2) {
+      releaseDownloads();
+    }
+    await downloadsReleased;
+    startedDownloads -= 1;
+    return url.includes('video') ? 'video-temp.m4v' : 'audio-temp.m4a';
+  };
+  DownloadService._buildTempFilePath = () => 'muxed-output.mp4';
+  audioExtractor.mergeVideoAndAudio = async (...args) => {
+    mergeArgs = args;
+  };
+  DownloadService._streamLocalFile = (...args) => {
+    streamArgs = args;
+  };
+  DownloadService._removeFileIfExists = (filePath) => removedFiles.push(filePath);
+
+  try {
+    await DownloadService.downloadVideo('https://www.bilibili.com/video/BV1TF8G6oERL/', '', {});
+
+    assert.deepEqual(downloadedUrls, [
+      'https://example.com/video.m4s',
+      'https://example.com/audio.m4s'
+    ]);
+    assert.equal(maxConcurrentDownloads, 2);
+    assert.equal(mergeArgs[0], 'video-temp.m4v');
+    assert.equal(mergeArgs[1], 'audio-temp.m4a');
+    assert.equal(mergeArgs[2], 'muxed-output.mp4');
+    assert.equal(mergeArgs[3].signal instanceof AbortSignal, true);
+    assert.deepEqual(streamArgs, ['muxed-output.mp4', {}, 'bili_title.mp4', 'video/mp4']);
+    assert.deepEqual(removedFiles, ['video-temp.m4v', 'audio-temp.m4a']);
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService._downloadTempMedia = originalDownloadTempMedia;
+    DownloadService._buildTempFilePath = originalBuildTempFilePath;
+    DownloadService._streamLocalFile = originalStreamLocalFile;
+    DownloadService._removeFileIfExists = originalRemoveFileIfExists;
+    audioExtractor.mergeVideoAndAudio = originalMergeVideoAndAudio;
+  }
+});
+
+test('DownloadService.downloadVideo 对 B 站缺音频流直接返回业务错误', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalStreamMedia = DownloadService.streamMedia;
+  let streamCalled = false;
+
+  VideoService.getOrParseVideoData = async () => ({
+    platform: 'bilibili',
+    title: 'silent-video',
+    videoUrl: 'https://example.com/video.m4s',
+    audioUrl: '',
+    requiresMuxing: false
+  });
+  DownloadService.streamMedia = async () => {
+    streamCalled = true;
+  };
+
+  try {
+    await assert.rejects(
+      () => DownloadService.downloadVideo('https://www.bilibili.com/video/BV1TF8G6oERL/', '', {}),
+      (error) =>
+        error.code === ErrorCodes.DOWNLOAD_RESOURCE_MISSING &&
+        error.message === 'Bilibili video download requires both video and audio streams'
+    );
+    assert.equal(streamCalled, false);
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService.streamMedia = originalStreamMedia;
+  }
+});
+
+test('DownloadService._downloadTempMedia 通过 Content-Length 拦截超限 B 站媒体', async () => {
+  const originalRequest = axios.request;
+  const originalMaxMediaBytes = config.bilibiliDownload.maxMediaBytes;
+
+  config.bilibiliDownload.maxMediaBytes = 10;
+  axios.request = async () => ({
+    headers: {
+      'content-length': '11'
+    },
+    data: Readable.from(['too-large'])
+  });
+
+  try {
+    await assert.rejects(
+      () => DownloadService._downloadTempMedia('https://example.com/video.m4s', { headers: {} }, 'm4v'),
+      (error) =>
+        error.code === ErrorCodes.DOWNLOAD_RESOURCE_MISSING &&
+        error.message === 'Bilibili media stream exceeds download size limit'
+    );
+  } finally {
+    axios.request = originalRequest;
+    config.bilibiliDownload.maxMediaBytes = originalMaxMediaBytes;
+  }
+});
+
+test('DownloadService._downloadTempMedia 通过流式计数拦截超限 B 站媒体', async () => {
+  const originalRequest = axios.request;
+  const originalMaxMediaBytes = config.bilibiliDownload.maxMediaBytes;
+  const originalBuildTempFilePath = DownloadService._buildTempFilePath;
+  const tempPath = require('path').join(__dirname, '..', 'temp', 'test-over-limit.m4v');
+
+  config.bilibiliDownload.maxMediaBytes = 3;
+  DownloadService._buildTempFilePath = () => tempPath;
+  axios.request = async () => ({
+    headers: {},
+    data: Readable.from([Buffer.from('abcd')])
+  });
+
+  try {
+    await assert.rejects(
+      () => DownloadService._downloadTempMedia('https://example.com/video.m4s', { headers: {} }, 'm4v'),
+      (error) =>
+        error.code === ErrorCodes.DOWNLOAD_RESOURCE_MISSING &&
+        error.message === 'Bilibili media stream exceeds download size limit'
+    );
+  } finally {
+    axios.request = originalRequest;
+    config.bilibiliDownload.maxMediaBytes = originalMaxMediaBytes;
+    DownloadService._buildTempFilePath = originalBuildTempFilePath;
+    DownloadService._removeFileIfExists(tempPath);
+  }
+});
+
+test('DownloadService._withBilibiliMuxSlot 限制同时合并数量', async () => {
+  const originalMaxMuxConcurrency = config.bilibiliDownload.maxMuxConcurrency;
+  const originalActiveCount = DownloadService.activeBilibiliMuxCount;
+  const originalQueue = DownloadService.bilibiliMuxQueue;
+  const events = [];
+
+  config.bilibiliDownload.maxMuxConcurrency = 1;
+  DownloadService.activeBilibiliMuxCount = 0;
+  DownloadService.bilibiliMuxQueue = [];
+
+  try {
+    let releaseFirst;
+    const first = DownloadService._withBilibiliMuxSlot(async () => {
+      events.push('first-start');
+      await new Promise((resolve) => {
+        releaseFirst = resolve;
+      });
+      events.push('first-end');
+    });
+    const second = DownloadService._withBilibiliMuxSlot(async () => {
+      events.push('second-start');
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ['first-start']);
+    releaseFirst();
+    await Promise.all([first, second]);
+    assert.deepEqual(events, ['first-start', 'first-end', 'second-start']);
+  } finally {
+    config.bilibiliDownload.maxMuxConcurrency = originalMaxMuxConcurrency;
+    DownloadService.activeBilibiliMuxCount = originalActiveCount;
+    DownloadService.bilibiliMuxQueue = originalQueue;
+  }
+});
+
+test('DownloadService._createDownloadAbortState 在客户端断开时触发取消信号', () => {
+  const res = new EventEmitter();
+  res.writableEnded = false;
+  res.finished = false;
+
+  const abortState = DownloadService._createDownloadAbortState(res);
+  assert.equal(abortState.signal.aborted, false);
+
+  res.emit('close');
+
+  assert.equal(abortState.signal.aborted, true);
+  abortState.dispose();
+});
+
+test('DownloadService.downloadVideo 在客户端断开时中止并清理并行下载', async () => {
+  const originalDownloadTempMedia = DownloadService._downloadTempMedia;
+  const originalBuildTempFilePath = DownloadService._buildTempFilePath;
+  const originalRemoveFileIfExists = DownloadService._removeFileIfExists;
+  const originalMergeVideoAndAudio = audioExtractor.mergeVideoAndAudio;
+  const res = new EventEmitter();
+  res.writableEnded = false;
+  res.finished = false;
+  const removedFiles = [];
+  let videoStarted = false;
+  let audioStarted = false;
+  let abortObserved = false;
+
+  DownloadService._buildTempFilePath = () => 'muxed-output.mp4';
+  DownloadService._removeFileIfExists = (filePath) => removedFiles.push(filePath);
+  DownloadService._downloadTempMedia = async (url, requestContext, extension, signal) => {
+    if (url.includes('video')) {
+      videoStarted = true;
+      return 'video-temp.m4v';
+    }
+
+    audioStarted = true;
+    await new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        abortObserved = true;
+        reject(new Error('download aborted'));
+      }, { once: true });
+    });
+    return 'audio-temp.m4a';
+  };
+  audioExtractor.mergeVideoAndAudio = async () => {
+    throw new Error('merge should not start after cancellation');
+  };
+
+  try {
+    const downloadPromise = DownloadService._downloadMuxedVideo(
+      'https://www.bilibili.com/video/BV1TF8G6oERL/',
+      {
+        platform: 'bilibili',
+        videoUrl: 'https://example.com/video.m4s',
+        audioUrl: 'https://example.com/audio.m4s',
+        requiresMuxing: true
+      },
+      'bili_title',
+      res
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(videoStarted, true);
+    assert.equal(audioStarted, true);
+    res.emit('close');
+
+    await assert.rejects(downloadPromise);
+    assert.equal(abortObserved, true);
+    assert.equal(removedFiles.includes('video-temp.m4v'), true);
+    assert.equal(removedFiles.includes('audio-temp.m4a'), false);
+  } finally {
+    DownloadService._downloadTempMedia = originalDownloadTempMedia;
+    DownloadService._buildTempFilePath = originalBuildTempFilePath;
+    DownloadService._removeFileIfExists = originalRemoveFileIfExists;
+    audioExtractor.mergeVideoAndAudio = originalMergeVideoAndAudio;
+  }
+});
+
+test('DownloadService.downloadVideo 对 B 站合并失败返回业务错误', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalDownloadTempMedia = DownloadService._downloadTempMedia;
+  const originalBuildTempFilePath = DownloadService._buildTempFilePath;
+  const originalRemoveFileIfExists = DownloadService._removeFileIfExists;
+  const originalMergeVideoAndAudio = audioExtractor.mergeVideoAndAudio;
+
+  VideoService.getOrParseVideoData = async () => ({
+    platform: 'bilibili',
+    title: 'bili-broken',
+    videoUrl: 'https://example.com/video.m4s',
+    audioUrl: 'https://example.com/audio.m4s',
+    requiresMuxing: true
+  });
+  DownloadService._downloadTempMedia = async () => 'temp-media';
+  DownloadService._buildTempFilePath = () => 'muxed-output.mp4';
+  DownloadService._removeFileIfExists = () => {};
+  audioExtractor.mergeVideoAndAudio = async () => {
+    const error = new Error('ffmpeg failed');
+    error.code = 'ENOENT';
+    throw error;
+  };
+
+  try {
+    await assert.rejects(
+      () => DownloadService.downloadVideo('https://www.bilibili.com/video/BV1TF8G6oERL/', '', {}),
+      (error) =>
+        error.code === ErrorCodes.DOWNLOAD_RESOURCE_MISSING &&
+        error.message === 'FFmpeg executable not found. Please install ffmpeg or configure FFMPEG_PATH.' &&
+        error.isBusiness === true
+    );
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService._downloadTempMedia = originalDownloadTempMedia;
+    DownloadService._buildTempFilePath = originalBuildTempFilePath;
+    DownloadService._removeFileIfExists = originalRemoveFileIfExists;
+    audioExtractor.mergeVideoAndAudio = originalMergeVideoAndAudio;
+  }
+});
+
+test('DownloadService.downloadAudio 对 B 站音频返回 m4a 文件', async () => {
+  const originalGetOrParseVideoData = VideoService.getOrParseVideoData;
+  const originalStreamMedia = DownloadService.streamMedia;
+  const streamCalls = [];
+
+  VideoService.getOrParseVideoData = async () => ({
+    platform: 'bilibili',
+    title: 'bili audio',
+    audioReady: true,
+    audioUrl: 'https://example.com/audio.m4s',
+    audioMimeType: 'audio/mp4',
+    audioFormat: 'm4a',
+    referer: 'https://www.bilibili.com/video/BV1TF8G6oERL/'
+  });
+  DownloadService.streamMedia = async (...args) => streamCalls.push(args);
+
+  try {
+    await DownloadService.downloadAudio('https://www.bilibili.com/video/BV1TF8G6oERL/', '', {}, () => {});
+
+    assert.equal(streamCalls.length, 1);
+    assert.equal(streamCalls[0][0], 'https://example.com/audio.m4s');
+    assert.equal(streamCalls[0][2], 'bili audio.m4a');
+    assert.equal(streamCalls[0][3], 'audio/mp4');
+    assert.deepEqual(streamCalls[0][4], {
+      headers: {
+        Referer: 'https://www.bilibili.com/video/BV1TF8G6oERL/',
+        Origin: 'https://www.bilibili.com',
+        'User-Agent': DownloadService.DEFAULT_BROWSER_UA
+      }
+    });
+  } finally {
+    VideoService.getOrParseVideoData = originalGetOrParseVideoData;
+    DownloadService.streamMedia = originalStreamMedia;
   }
 });
 
