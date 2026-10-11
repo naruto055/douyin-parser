@@ -57,6 +57,35 @@ pnpm start
 
 开发时也可在 `backend/` 执行 `pnpm dev`；当前与 `pnpm start` 一样运行 `node app.js`，不包含自动重启。
 
+#### 初始化抖音浏览器会话（可选）
+
+`pnpm douyin:session` 会打开可视浏览器，供你手动完成抖音安全验证或登录，并将 Cookie、本地存储等保存到专用目录。后端解析时复用该目录中的会话；命令不会主动提取或导出账号资料。
+
+需要初始化会话时，先停止后端服务，确认 `backend/.env` 中已配置以下参数，完整示例见 [backend/.env.example](./backend/.env.example)：
+
+```dotenv
+# 保存登录和验证状态；在 backend/ 下运行时，实际目录为 backend/browserData。
+DOUYIN_BROWSER_USER_DATA_DIR=browserData
+# 后端默认无界面运行；桌面环境遇到验证问题时可改为 false。
+DOUYIN_BROWSER_HEADLESS=true
+# 已使用会话目录时通常无需手动提供 Cookie。
+DOUYIN_COOKIE=
+# DOM 加载完成后等待详情接口的上限，单位毫秒；有效响应到达后立即返回。
+POST_LOAD_DETAIL_WAIT_MS=8000
+# 留空时使用 Puppeteer 自带浏览器，也可指定 Chrome/Chromium 可执行文件路径。
+DOUYIN_BROWSER_EXECUTABLE_PATH=
+```
+
+在 `backend/` 目录执行：
+
+```bash
+pnpm douyin:session
+```
+
+在打开的浏览器中完成验证或登录，确认视频能播放后关闭整个浏览器，待终端提示会话浏览器已关闭，再执行 `pnpm start`。此命令需要可用的图形显示环境，始终打开可视浏览器，不受 `DOUYIN_BROWSER_HEADLESS` 配置影响。
+
+初始化命令与后端服务应使用同一个会话目录，并避免同时占用它。相对路径基于命令启动目录，也可使用绝对路径（如 `/home/用户名/.douyin-parser/browser-session`）；更换目录后需要迁移原会话数据或重新初始化。会话过期或再次出现验证提示时，可重复上述步骤。会话目录和真实 Cookie 包含登录凭据，不要提交到 Git。
+
 ### 3. 启动前端 H5
 
 保持后端运行，另开一个终端，在仓库根目录执行：
@@ -181,17 +210,6 @@ VITE_PUBLIC_DOWNLOAD_BASE_URL=https://api.example.com
 - 抖音独立音频可能是作品音乐 / BGM，并不保证包含视频中的全部原声；B 站音频通常保留源流格式 `.m4a`。
 - 无水印情况与上游媒体来源有关，不能保证每次解析都返回无水印文件。
 - 前端已记录类型检查和三端构建通过，真实后端联调及小程序手工验收尚未完成，见 [实施状态](./docs/frontend/IMPLEMENTATION_STATUS.md)。
-
-## 常见问题
-
-| 问题 | 排查方式 |
-| --- | --- |
-| 后端启动时找不到浏览器或 Chromium 启动失败 | 检查 Puppeteer 安装脚本是否执行、浏览器是否已下载及系统依赖是否齐全；pnpm 提示忽略依赖脚本时，按提示允许 Puppeteer 等所需依赖执行安装脚本后重装依赖 |
-| 音频提取或 B 站视频合并报 FFmpeg 错误 | 检查 `ffmpeg-static` 二进制是否可执行，或安装系统 FFmpeg / 设置 `FFMPEG_PATH` |
-| H5 提示无法连接后端 | 先访问 `/api/health`，再核对后端端口与 `VITE_API_BASE_URL`，修改环境变量后重启前端 |
-| 小程序或手机访问失败 | 将 `localhost` 改为可达 IP / 域名，并核对网络连通性及平台合法域名配置 |
-| 修改开发地址不生效 / H5 生产环境仍请求 `localhost` | 开发地址放在 `.env.development.local`，生产地址放在 `.env.production.local`；核对终端环境变量是否覆盖配置，再重启或重新构建 |
-| 下载直链失效或返回 403 | 使用后端 `/api/download` 地址而非上游 CDN 直链；仍失败时重新解析并检查平台资源可用性 |
 
 ## 项目结构
 
