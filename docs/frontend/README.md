@@ -13,6 +13,7 @@
 - [技术选型](./TECH_STACK.md)：UniApp、Vue3、TypeScript、UI 与样式方案。
 - [实施计划](./IMPLEMENTATION_PLAN.md)：前端项目从骨架到接口联调的分阶段计划。
 - [接口接入方案](./API_INTEGRATION_PLAN.md)：基于后端 API 文档的前端接口分层与接入规则。
+- [B 站视频解析接入计划](./BILIBILI_INTEGRATION_PLAN.md)：现有解析工作台接入 B 站解析与下载能力的范围、步骤和验收标准。
 - [实施状态](./IMPLEMENTATION_STATUS.md)：当前已完成内容、未验证项和下一步。
 
 ## 当前决策
