@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const config = require('../config');
+const path = require('path');
 
 puppeteer.use(StealthPlugin());
 
@@ -83,9 +84,9 @@ function getWorkerCount() {
 }
 
 // 浏览器的启动参数集中在这里，便于初始化和重建逻辑复用同一套配置。
-function launchBrowser() {
-  return puppeteer.launch({
-    headless: 'new',
+function launchBrowser({ headless = config.douyin.headless ? 'new' : false } = {}) {
+  const options = {
+    headless,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -94,7 +95,17 @@ function launchBrowser() {
       '--disable-accelerated-2d-canvas',
       '--disable-gpu'
     ]
-  });
+  };
+
+  // 服务与手工会话初始化共用专用目录，保留 Cookie 和本地存储。
+  if (config.douyin.userDataDir) {
+    options.userDataDir = path.resolve(config.douyin.userDataDir);
+  }
+  if (config.douyin.executablePath) {
+    options.executablePath = config.douyin.executablePath;
+  }
+
+  return puppeteer.launch(options);
 }
 
 // 每个 worker 只持有一个 Page 实例用于复用。页面只做一次预处理，
@@ -106,7 +117,7 @@ async function createWorkerState(browser, index) {
     throw new Error('Browser pool is closing');
   }
 
-  await page.setUserAgent(getDefaultUserAgent());
+  await configureUserAgent(page);
   await page.setRequestInterception(true);
 
   return {
@@ -118,14 +129,11 @@ async function createWorkerState(browser, index) {
   };
 }
 
-// 固定 User-Agent 可以让重复任务的行为更可比，也能避免浏览器复用时
-// 产生一些细微差异。
-function getDefaultUserAgent() {
-  return (
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
-    'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-    'Chrome/120.0.0.0 Safari/537.36'
-  );
+// 使用实际浏览器的版本和系统，避免 Chrome/120 与运行中的浏览器不一致。
+async function configureUserAgent(page) {
+  if (typeof page.browser !== 'function') return;
+  const userAgent = await page.browser().userAgent();
+  await page.setUserAgent(userAgent.replace('HeadlessChrome/', 'Chrome/'));
 }
 
 // 先把任务放入队列，再由调度器分配给空闲 worker。
@@ -333,13 +341,15 @@ async function executeTask({ page, data }) {
 
   let requestCleanup = null;
   let detailResponsePromise = null;
+  let detailWaitTimer = null;
 
   const pagePrepareStartTime = Date.now();
 
   try {
     // 这里故意重复做任务级初始化，因为复用的页面可能残留旧监听器
     // 或前一个任务留下的状态。
-    await page.setUserAgent(getDefaultUserAgent());
+    await configureUserAgent(page);
+    await applyDouyinSession(page, url);
     requestCleanup = await enableLightweightRequestInterception(page, diagnostics);
     diagnostics.pagePrepareMs = Date.now() - pagePrepareStartTime;
 
@@ -361,8 +371,7 @@ async function executeTask({ page, data }) {
       return null;
     });
 
-    // 谁先结束就先走谁：detail 接口优先，其次是页面加载完成，
-    // 再不行才走一个很短的 post-load 等待窗口。
+    // 有效详情接口优先返回，DOM 加载完成后仍需等待客户端脚本初始化。
     const apiData = await Promise.race([detailResponsePromise, pageLoadPromise]);
     if (apiData) {
       attachDiagnostics(apiData, diagnostics);
@@ -370,11 +379,12 @@ async function executeTask({ page, data }) {
       return apiData;
     }
 
-    // 额外补一个很短的窗口，用来接住刚过 DOMContentLoaded 才到的响应，
-    // 但不用支付完整的页面 idle 超时。
+    // 不以 DOMContentLoaded 作为数据已就绪的信号，给延迟详情请求保留有界窗口。
     const delayedApiData = await Promise.race([
       detailResponsePromise,
-      page.waitForTimeout(config.browserPool.postLoadDetailWaitMs).then(() => null)
+      new Promise((resolve) => {
+        detailWaitTimer = setTimeout(() => resolve(null), config.browserPool.postLoadDetailWaitMs);
+      })
     ]);
 
     if (delayedApiData) {
@@ -390,6 +400,7 @@ async function executeTask({ page, data }) {
     logPuppeteerDiagnostics(diagnostics);
     return pageData;
   } finally {
+    clearTimeout(detailWaitTimer);
     // 即使任务失败，清理也必须执行，因为复用页面会持续保留状态，
     // 直到我们显式移除监听器并重置文档。
     if (detailResponsePromise && typeof detailResponsePromise.cleanup === 'function') {
@@ -420,6 +431,34 @@ function getQueueWaitMs(enqueuedAt, now = Date.now()) {
   return Math.max(0, now - enqueuedAt);
 }
 
+// 只向抖音域注入用户显式配置的会话，避免影响其他平台或将凭据带入响应。
+async function applyDouyinSession(page, url) {
+  if (!config.douyin.cookie) return;
+  const hostname = new URL(url).hostname;
+  if (hostname !== 'douyin.com' && !hostname.endsWith('.douyin.com')) return;
+
+  const cookies = config.douyin.cookie.split(';').flatMap((part) => {
+    const separator = part.indexOf('=');
+    if (separator < 1) return [];
+    const name = part.slice(0, separator).trim();
+    if (!name || /[\s\x00-\x1f\x7f]/.test(name)) return [];
+    return [{
+      name,
+      value: part.slice(separator + 1).trim(),
+      domain: '.douyin.com',
+      path: '/',
+      secure: true
+    }];
+  });
+  try {
+    if (!cookies.length) throw new Error('No valid cookies');
+    await page.setCookie(...cookies);
+  } catch (error) {
+    // CDP 错误可能包含输入参数，替换为固定提示以免日志输出会话凭据。
+    throw new Error('抖音浏览器会话配置无法加载，请检查 DOUYIN_COOKIE 格式');
+  }
+}
+
 // 诊断对象刻意保持成普通数据，这样日志和测试都能直接检查同一结构，
 // 不需要额外转换。
 /**
@@ -443,6 +482,8 @@ function createPuppeteerDiagnostics() {
     detailHasAweme: false,
     detailJsonParsed: false,
     detailJsonError: false,
+    detailResponseEmpty: false,
+    detailFailureReason: '',
     fallback: 'none',
     gotoMs: 0,
     pagePrepareMs: 0,
@@ -464,7 +505,10 @@ function createPuppeteerDiagnostics() {
     requestInterceptionErrors: 0,
     pageMetaTitleFound: false,
     pageMetaCoverFound: false,
-    pageMetaError: false
+    pageMetaError: false,
+    pageVerificationRequired: false,
+    sessionConfigured: Boolean(config.douyin.cookie || config.douyin.userDataDir),
+    persistentSession: Boolean(config.douyin.userDataDir)
   };
 }
 
@@ -491,7 +535,11 @@ function logPuppeteerDiagnostics(diagnostics) {
     `detailValidMs=${diagnostics.detailValidMs || 'n/a'}`,
     `fallback=${diagnostics.fallback}`,
     `requests=${diagnostics.totalRequestCount}`,
-    `blocked=${diagnostics.blockedRequestCount}`
+    `blocked=${diagnostics.blockedRequestCount}`,
+    `detailFailure=${diagnostics.detailFailureReason || 'none'}`,
+    `verification=${diagnostics.pageVerificationRequired}`,
+    `sessionConfigured=${diagnostics.sessionConfigured}`,
+    `persistentSession=${diagnostics.persistentSession}`
   );
 }
 
@@ -584,6 +632,21 @@ function waitForAwemeDetail(page, diagnostics = null) {
       if (diagnostics) {
         diagnostics.detailApiMatched = true;
         diagnostics.detailHttpStatus = response.status();
+        const headers = typeof response.headers === 'function' ? response.headers() : {};
+        // 只保存固定原因标识，不输出请求令牌或完整响应头。
+        let abortReason = headers['x-whale-throughput-abort-data'] || '';
+        try {
+          abortReason = decodeURIComponent(abortReason);
+        } catch (error) {}
+        if (/强制登录|login/i.test(abortReason)) {
+          diagnostics.detailFailureReason = 'login_required';
+        } else if ([401, 403].includes(response.status())) {
+          diagnostics.detailFailureReason = 'access_denied';
+        }
+        if (headers['content-length'] === '0') {
+          diagnostics.detailResponseEmpty = true;
+          diagnostics.detailFailureReason ||= 'empty_response';
+        }
         diagnostics.detailQueryKeys = extractQueryKeys(response.url());
         if (diagnostics.gotoStartAt) {
           diagnostics.detailMatchedMs = Date.now() - diagnostics.gotoStartAt;
@@ -606,16 +669,34 @@ function waitForAwemeDetail(page, diagnostics = null) {
         if (apiData && apiData.status_code === 0 && apiData.aweme_detail) {
           if (diagnostics) {
             diagnostics.detailApiValid = true;
+            diagnostics.detailResponseEmpty = false;
+            diagnostics.detailJsonError = false;
+            diagnostics.detailFailureReason = '';
             diagnostics.fallback = 'detail_api';
             diagnostics.detailValidMs = diagnostics.gotoStartAt
               ? Date.now() - diagnostics.gotoStartAt
               : 0;
           }
           resolve(apiData);
+        } else if (diagnostics) {
+          diagnostics.detailFailureReason ||= apiData?.status_code === 0
+            ? 'detail_missing'
+            : 'status_error';
         }
       } catch (error) {
         if (diagnostics) {
           diagnostics.detailJsonError = true;
+          // 某些空响应使用 chunked 编码，没有 content-length，读取正文后再分类。
+          if (typeof response.text === 'function') {
+            try {
+              if (!(await response.text()).trim()) {
+                diagnostics.detailResponseEmpty = true;
+              }
+            } catch (readError) {}
+          }
+          diagnostics.detailFailureReason ||= diagnostics.detailResponseEmpty
+            ? 'empty_response'
+            : 'invalid_json';
         }
         // 某些响应可能不是合法 JSON，这里忽略并继续走页面兜底解析。
       }
@@ -635,7 +716,7 @@ function waitForAwemeDetail(page, diagnostics = null) {
  *
  * @param {import('puppeteer').Page} page Puppeteer 页面对象
  * @param {object | null} diagnostics 诊断对象
- * @returns {Promise<{title: string, cover: string, description: string} | null>} 页面解析结果
+ * @returns {Promise<{title: string, cover: string, description: string, verificationRequired: boolean} | null>} 页面解析结果
  */
 async function parseFromPage(page, diagnostics = null) {
   try {
@@ -648,13 +729,23 @@ async function parseFromPage(page, diagnostics = null) {
       return {
         title: getMeta('og:title') || document.title,
         cover: getMeta('og:image'),
-        description: getMeta('og:description')
+        description: getMeta('og:description'),
+        // 验证码 iframe 是平台要求人工验证的信号，不尝试自动完成验证。
+        verificationRequired: Array.from(document.querySelectorAll('iframe[src]')).some((frame) => {
+          try {
+            const url = new URL(frame.src);
+            return url.hostname === 'rmc.bytedance.com' && url.pathname === '/verifycenter/captcha/v2';
+          } catch (error) {
+            return false;
+          }
+        })
       };
     });
 
     if (diagnostics) {
       diagnostics.pageMetaTitleFound = Boolean(data.title);
       diagnostics.pageMetaCoverFound = Boolean(data.cover);
+      diagnostics.pageVerificationRequired = Boolean(data.verificationRequired);
       attachDiagnostics(data, diagnostics);
     }
 
@@ -720,23 +811,24 @@ function detachPageListener(page, eventName, handler) {
   }
 }
 
-// 在任务之间重置页面，可以防止 cookie、storage 或残留 DOM 内容
-// 把跨请求状态带过去。
+// 在任务之间重置页面；专用持久会话需要保留平台验证所依赖的存储。
 async function resetWorkerPage(page) {
   if (!page || isPageClosed(page)) {
     return;
   }
 
   try {
-    // 先在页面上下文里清掉 storage，避免后续任务继承前一次解析的应用状态。
-    await page.evaluate(() => {
-      try {
-        window.localStorage.clear();
-      } catch (error) {}
-      try {
-        window.sessionStorage.clear();
-      } catch (error) {}
-    });
+    // 默认清理存储；专用会话保留平台验证所依赖的状态。
+    await page.evaluate((preserveSession) => {
+      if (!preserveSession) {
+        try {
+          window.localStorage.clear();
+        } catch (error) {}
+        try {
+          window.sessionStorage.clear();
+        } catch (error) {}
+      }
+    }, Boolean(config.douyin.userDataDir));
   } catch (error) {
     // 页面可能已切换到不可执行上下文，忽略即可。
   }
@@ -856,6 +948,8 @@ async function close() {
 }
 
 module.exports = {
+  launchBrowser,
+  configureUserAgent,
   initCluster,
   execute,
   close,

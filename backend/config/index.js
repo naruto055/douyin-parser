@@ -84,10 +84,18 @@ module.exports = {
     /**
      * 页面加载完成后继续等待详情接口的时间，单位为毫秒。
      *
-     * 详情接口可能在 DOM 加载完成后稍晚返回；保留短暂窗口可以覆盖这类情况，
-     * 同时避免固定等待过久拖慢页面兜底解析。
+     * 首次访问可能先经历页面重载和脚本初始化，详情请求会晚于 DOM 加载数秒。
+     * 有效详情一到立即返回；此配置仅限制没有有效响应时的等待上限。
      */
-    postLoadDetailWaitMs: Number(process.env.POST_LOAD_DETAIL_WAIT_MS || 1200)
+    postLoadDetailWaitMs: Number(process.env.POST_LOAD_DETAIL_WAIT_MS || 8000)
+  },
+
+  // 可选的用户自有抖音浏览器会话，仅注入后台浏览器，不返回给 API 调用方。
+  douyin: {
+    cookie: process.env.DOUYIN_COOKIE || '',
+    userDataDir: process.env.DOUYIN_BROWSER_USER_DATA_DIR || '',
+    executablePath: process.env.DOUYIN_BROWSER_EXECUTABLE_PATH || '',
+    headless: process.env.DOUYIN_BROWSER_HEADLESS !== 'false'
   },
 
   /**

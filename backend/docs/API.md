@@ -185,7 +185,32 @@ Content-Type: application/json
 | bilibili.part | string | 当前分 P 标题（可选） |
 | bilibili.quality | number | 播放接口返回的清晰度标识（可选） |
 | puppeteerDiagnostics | object | 抖音 Puppeteer 解析诊断信息（可选） |
+| puppeteerDiagnostics.detailResponseEmpty | boolean | 详情接口是否返回过空响应；后续收到有效详情时清零 |
+| puppeteerDiagnostics.detailFailureReason | string | 详情失败原因，取值见下方抖音说明 |
+| puppeteerDiagnostics.pageVerificationRequired | boolean | 页面是否出现要求安全验证的验证码 iframe |
+| puppeteerDiagnostics.sessionConfigured | boolean | 是否配置 Cookie 或持久会话目录，仅返回布尔值 |
+| puppeteerDiagnostics.persistentSession | boolean | 是否启用专用持久会话目录 |
 | fallbackReason | string | Puppeteer 失败后进入第三方 API 兜底的原因（可选） |
+
+**抖音说明**:
+
+- DOM 加载完成不代表详情已就绪。默认继续等待最多 8 秒，收到有效详情立即返回，可通过 `POST_LOAD_DETAIL_WAIT_MS` 调整。
+- Puppeteer 和 HTTP detail 路径只有取得视频或音频地址才算成功，不会将仅含页面标题 / 封面的页面壳当作可下载结果。
+- `detailFailureReason` 可能为 `empty_response`、`login_required`、`access_denied`、`invalid_json`、`status_error` 或 `detail_missing`；详情成功时为空字符串。
+- HTTP 200 + 空正文可能是平台访问限制，不等同于视频解析成功。安全验证 / 登录要求需要在平台允许的浏览器环境中处理，服务不自动完成验证码。
+- 普通浏览器可播放而后台浏览器受限时，可在本地 `backend/.env` 中设置 `DOUYIN_COOKIE`，使用用户自有的可用浏览器会话。该配置只注入 `.douyin.com` 域，不会出现在解析响应或诊断日志中；会话过期或 IP 等访问条件变化时仍可能失败。
+- `DOUYIN_BROWSER_USER_DATA_DIR` 用于专用持久会话目录，服务在任务结束时保留浏览器存储。不要使用日常 Chrome 的用户目录，也不要将会话目录放入仓库。
+- 桌面环境可将 `DOUYIN_BROWSER_HEADLESS=false`，让服务使用可视浏览器；无显示器的服务器保持 `true`，否则 Chromium 可能无法启动。
+- 第三方兜底也失败时，`message` 和 `data.fallbackReason` 保留主链路识别的受限或超时原因，第三方错误保存在 `data.thirdPartyError`。
+
+**初始化专用抖音会话（桌面环境）**:
+
+1. 停止后端服务，在 `backend/.env` 设置专用目录，例如 `DOUYIN_BROWSER_USER_DATA_DIR=/home/用户名/.douyin-parser/browser-session`；Windows 可使用 `C:/Users/用户名/.douyin-parser/browser-session`。
+2. 设置 `DOUYIN_BROWSER_HEADLESS=false`，使服务与初始化时都使用可视浏览器；使用专用目录时将 `DOUYIN_COOKIE` 留空，避免旧 Cookie 覆盖已验证的会话。可通过 `DOUYIN_BROWSER_EXECUTABLE_PATH` 指定本机 Chrome / Chromium，初始化和服务应使用相同的浏览器和目录。
+3. 在 `backend/` 运行 `pnpm douyin:session https://www.douyin.com/video/作品ID`，在打开的窗口中手动完成验证或登录，确认视频可以播放。
+4. 关闭整个会话浏览器，再运行 `pnpm start`。日志中的 `sessionConfigured=true persistentSession=true` 表示已加载配置；仅表示会话已配置，不保证平台允许访问。
+
+会话失效后可停止后端并重新初始化。无显示环境时无法运行手工初始化命令；Cookie / 专用目录仍可能受到 IP、会话及平台策略限制。本功能不自动完成验证码。
 
 **Bilibili 说明**:
 - 第一版支持未登录即可访问的普通公开视频，默认解析第 1 P。
@@ -511,6 +536,11 @@ async function parseAndDownload(shareUrl) {
 | bilibiliDownload.maxMuxConcurrency | 1 | Bilibili FFmpeg 合并并发数 |
 | httpDetail.enabled | false | HTTP detail 快速路径开关，默认关闭 |
 | httpDetail.timeoutMs | 800 | HTTP detail 快速路径超时（毫秒） |
+| browserPool.postLoadDetailWaitMs | 8000 | DOM 加载后等待有效抖音详情的上限（毫秒），由 `POST_LOAD_DETAIL_WAIT_MS` 覆盖 |
+| douyin.cookie | 空字符串 | 可选的用户自有抖音会话 Cookie，由 `DOUYIN_COOKIE` 设置，只用于后台浏览器 |
+| douyin.userDataDir | 空字符串 | 专用持久会话目录，由 `DOUYIN_BROWSER_USER_DATA_DIR` 设置 |
+| douyin.executablePath | 空字符串 | Chrome / Chromium 可执行文件路径，由 `DOUYIN_BROWSER_EXECUTABLE_PATH` 设置 |
+| douyin.headless | true | 是否以 headless 模式运行抖音浏览器，由 `DOUYIN_BROWSER_HEADLESS=false` 关闭 |
 
 ### AI 相关配置
 

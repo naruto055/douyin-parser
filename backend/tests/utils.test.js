@@ -22,13 +22,14 @@ const {
   executeTask,
   getQueueWaitMs,
   enableLightweightRequestInterception,
-  waitForAwemeDetail
+  waitForAwemeDetail,
+  createPuppeteerDiagnostics
 } = require('../utils/browserPool');
 
 test('browserPool 详情接口 post-load 等待窗口应读取配置并提供默认值', () => {
   assert.equal(
     config.browserPool.postLoadDetailWaitMs,
-    Number(process.env.POST_LOAD_DETAIL_WAIT_MS || 1200)
+    Number(process.env.POST_LOAD_DETAIL_WAIT_MS || 8000)
   );
 });
 
@@ -270,7 +271,7 @@ test('parse 在 Puppeteer 失败后应使用第三方兜底并返回统一模型
   const originalExecute = browserPool.execute;
   const originalParseWithThirdParty = thirdPartyAPI.parseWithThirdParty;
   const originalHttpDetailEnabled = config.httpDetail.enabled;
-  const diagnostics = { detailApiValid: false, fallback: 'page_meta' };
+  const diagnostics = { detailApiMatched: false, detailApiValid: false, fallback: 'page_meta' };
 
   config.httpDetail.enabled = true;
   axios.get = async () => {
@@ -298,7 +299,7 @@ test('parse 在 Puppeteer 失败后应使用第三方兜底并返回统一模型
     assert.equal(result.videoUrl, 'https://example.com/fallback.mp4');
     assert.equal(result.audioReady, true);
     assert.equal(result.puppeteerDiagnostics, diagnostics);
-    assert.equal(result.fallbackReason, 'Puppeteer parse returned no useful data');
+    assert.equal(result.fallbackReason, '等待抖音详情接口超时，页面未返回可下载媒体');
     assert.deepEqual(result.videoBackupUrls, []);
   } finally {
     axios.get = originalGet;
@@ -313,7 +314,7 @@ test('parse 在 Puppeteer 和第三方均失败时应保留诊断和第三方错
   const originalExecute = browserPool.execute;
   const originalParseWithThirdParty = thirdPartyAPI.parseWithThirdParty;
   const originalHttpDetailEnabled = config.httpDetail.enabled;
-  const diagnostics = { detailApiValid: false };
+  const diagnostics = { detailApiMatched: false, detailApiValid: false };
 
   config.httpDetail.enabled = true;
   axios.get = async () => {
@@ -332,10 +333,10 @@ test('parse 在 Puppeteer 和第三方均失败时应保留诊断和第三方错
     await assert.rejects(
       () => parse('https://www.douyin.com/video/1234567890', { skipShortUrlResolution: true }),
       (error) => {
-        assert.equal(error.message, 'All third-party APIs failed');
+        assert.equal(error.message, '等待抖音详情接口超时，页面未返回可下载媒体');
         assert.deepEqual(error.data, {
           puppeteerDiagnostics: diagnostics,
-          fallbackReason: 'Puppeteer parse returned no useful data',
+          fallbackReason: '等待抖音详情接口超时，页面未返回可下载媒体',
           thirdPartyError: 'All third-party APIs failed'
         });
         return true;
@@ -346,6 +347,72 @@ test('parse 在 Puppeteer 和第三方均失败时应保留诊断和第三方错
     browserPool.execute = originalExecute;
     thirdPartyAPI.parseWithThirdParty = originalParseWithThirdParty;
     config.httpDetail.enabled = originalHttpDetailEnabled;
+  }
+});
+
+test('parse 不应把页面壳标题当作成功结果并缓存', async () => {
+  const originalExecute = browserPool.execute;
+  const originalFallback = thirdPartyAPI.parseWithThirdParty;
+  const originalEnabled = config.httpDetail.enabled;
+  config.httpDetail.enabled = false;
+  browserPool.execute = async () => ({ title: '抖音 - 记录美好生活', cover: '' });
+  thirdPartyAPI.parseWithThirdParty = async () => ({ videoUrl: 'https://example.com/fallback.mp4' });
+  try {
+    const result = await parse('https://www.douyin.com/video/123', { skipShortUrlResolution: true });
+    assert.equal(result.videoUrl, 'https://example.com/fallback.mp4');
+    assert.equal(result.fallbackReason, 'Puppeteer parse returned no useful data');
+  } finally {
+    browserPool.execute = originalExecute;
+    thirdPartyAPI.parseWithThirdParty = originalFallback;
+    config.httpDetail.enabled = originalEnabled;
+  }
+});
+
+test('parse 应接受没有标题和封面但包含有效媒体的详情', async () => {
+  const originalExecute = browserPool.execute;
+  const originalEnabled = config.httpDetail.enabled;
+  config.httpDetail.enabled = false;
+  browserPool.execute = async () => ({ aweme_detail: {
+    video: { play_addr: { url_list: ['https://example.com/video.mp4'] } }
+  } });
+  try {
+    const result = await parse('https://www.douyin.com/video/123', { skipShortUrlResolution: true });
+    assert.equal(result.videoUrl, 'https://example.com/video.mp4');
+    assert.equal(result.title, '');
+  } finally {
+    browserPool.execute = originalExecute;
+    config.httpDetail.enabled = originalEnabled;
+  }
+});
+
+test('parse 在第三方失败后应保留验证码和空响应原因', async () => {
+  const originalExecute = browserPool.execute;
+  const originalFallback = thirdPartyAPI.parseWithThirdParty;
+  const originalEnabled = config.httpDetail.enabled;
+  config.httpDetail.enabled = false;
+  const diagnostics = {
+    detailApiMatched: true,
+    detailResponseEmpty: true,
+    detailFailureReason: 'empty_response',
+    pageVerificationRequired: true
+  };
+  browserPool.execute = async () => ({ title: '抖音', __diagnostics: diagnostics });
+  thirdPartyAPI.parseWithThirdParty = async () => { throw new Error('All third-party APIs failed'); };
+  try {
+    await assert.rejects(
+      () => parse('https://www.douyin.com/video/123', { skipShortUrlResolution: true }),
+      (error) => {
+        assert.match(error.message, /安全验证/);
+        assert.equal(error.data.fallbackReason, error.message);
+        assert.equal(error.data.thirdPartyError, 'All third-party APIs failed');
+        assert.equal(error.data.puppeteerDiagnostics, diagnostics);
+        return true;
+      }
+    );
+  } finally {
+    browserPool.execute = originalExecute;
+    thirdPartyAPI.parseWithThirdParty = originalFallback;
+    config.httpDetail.enabled = originalEnabled;
   }
 });
 
@@ -898,10 +965,108 @@ test('waitForAwemeDetail 命中有效详情接口时应返回数据', async () =
   assert.equal(result.aweme_detail.desc, 'detail-video');
 });
 
+test('waitForAwemeDetail 应区分空响应和登录限制并继续接收有效详情', async () => {
+  const handlers = {};
+  const page = { on: (event, handler) => { handlers[event] = handler; }, off: () => {} };
+  const diagnostics = createPuppeteerDiagnostics();
+  const promise = waitForAwemeDetail(page, diagnostics);
+  const response = {
+    url: () => 'https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=123',
+    status: () => 200,
+    headers: () => ({ 'content-length': '0' }),
+    json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+    text: async () => ''
+  };
+  await handlers.response(response);
+  assert.equal(diagnostics.detailResponseEmpty, true);
+  assert.equal(diagnostics.detailFailureReason, 'empty_response');
+  await handlers.response({ ...response,
+    headers: () => ({ 'x-whale-throughput-abort-data': encodeURIComponent('强制登录') })
+  });
+  assert.equal(diagnostics.detailFailureReason, 'login_required');
+  await handlers.response({ ...response,
+    headers: () => ({}),
+    json: async () => ({ status_code: 0, aweme_detail: { desc: 'valid' } })
+  });
+  const result = await promise;
+  assert.equal(result.aweme_detail.desc, 'valid');
+  assert.equal(diagnostics.detailFailureReason, '');
+  assert.equal(diagnostics.detailResponseEmpty, false);
+  assert.equal(diagnostics.detailJsonError, false);
+  await promise.cleanup();
+});
+
+test('executeTask 在 DOM 加载后应接收延迟详情响应并清理监听器', async () => {
+  const originalWait = config.browserPool.postLoadDetailWaitMs;
+  config.browserPool.postLoadDetailWaitMs = 200;
+  const handlers = new Map();
+  let timer;
+  const page = {
+    setUserAgent: async () => {},
+    setRequestInterception: async () => {},
+    on: (event, handler) => handlers.set(event, handler),
+    off: (event) => handlers.delete(event),
+    goto: async (url) => {
+      if (url !== 'about:blank') {
+        timer = setTimeout(() => { void handlers.get('response')({
+          url: () => 'https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=123',
+          status: () => 200,
+          json: async () => ({ status_code: 0, aweme_detail: { desc: 'delayed' } })
+        }); }, 30);
+      }
+    },
+    evaluate: async () => { throw new Error('No page metadata'); }
+  };
+  try {
+    const result = await executeTask({ page, data: { url: 'https://www.douyin.com/video/123' } });
+    assert.equal(result.aweme_detail.desc, 'delayed');
+    assert.equal(result.__diagnostics.fallback, 'detail_api');
+    assert.equal(handlers.size, 0);
+  } finally {
+    clearTimeout(timer);
+    config.browserPool.postLoadDetailWaitMs = originalWait;
+  }
+});
+
+test('executeTask 仅将配置会话注入抖音域且不泄露到解析结果', async () => {
+  const originalCookie = config.douyin.cookie;
+  const handlers = {};
+  const injected = [];
+  config.douyin.cookie = 'sessionid=test-session; token=abc=def; malformed';
+  const page = {
+    setUserAgent: async () => {},
+    setCookie: async (...cookies) => injected.push(...cookies),
+    setRequestInterception: async () => {},
+    on: (event, handler) => { handlers[event] = handler; },
+    off: (event) => { delete handlers[event]; },
+    goto: async (url) => {
+      if (url === 'about:blank') return;
+      await handlers.response({
+        url: () => 'https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=123',
+        status: () => 200,
+        json: async () => ({ status_code: 0, aweme_detail: { desc: 'test' } })
+      });
+    },
+    evaluate: async () => {}
+  };
+  try {
+    const result = await executeTask({ page, data: 'https://www.douyin.com/video/123' });
+    assert.deepEqual(injected.map(({ name, value, domain }) => ({ name, value, domain })), [
+      { name: 'sessionid', value: 'test-session', domain: '.douyin.com' },
+      { name: 'token', value: 'abc=def', domain: '.douyin.com' }
+    ]);
+    assert.equal(JSON.stringify(result).includes('test-session'), false);
+    injected.length = 0;
+    await executeTask({ page, data: 'https://www.bilibili.com/video/BV123/' });
+    assert.equal(injected.length, 0);
+  } finally {
+    config.douyin.cookie = originalCookie;
+  }
+});
+
 test('executeTask 应使用配置的 post-load 等待窗口并保留排队诊断', async () => {
   const originalNow = Date.now;
   const originalWait = config.browserPool.postLoadDetailWaitMs;
-  let configuredWaitMs;
   const handlers = {};
   const page = {
     setUserAgent: async () => {},
@@ -910,9 +1075,6 @@ test('executeTask 应使用配置的 post-load 等待窗口并保留排队诊断
       handlers[eventName] = handler;
     },
     goto: async () => null,
-    waitForTimeout: async (timeoutMs) => {
-      configuredWaitMs = timeoutMs;
-    },
     evaluate: async () => ({
       title: 'page-title',
       cover: 'https://example.com/cover.jpg',
@@ -932,7 +1094,7 @@ test('executeTask 应使用配置的 post-load 等待窗口并保留排队诊断
       }
     });
 
-    assert.equal(configuredWaitMs, 321);
+    assert.equal(result.__diagnostics.postLoadWaitMs, 321);
     assert.equal(result.title, 'page-title');
     assert.equal(result.__diagnostics.queueWaitMs, 500);
     assert.equal(typeof handlers.request, 'function');
@@ -940,6 +1102,77 @@ test('executeTask 应使用配置的 post-load 等待窗口并保留排队诊断
   } finally {
     Date.now = originalNow;
     config.browserPool.postLoadDetailWaitMs = originalWait;
+  }
+});
+
+test('executeTask 持久会话保留存储，普通模式清理存储并重置页面', async () => {
+  const originalCookie = config.douyin.cookie;
+  const originalUserDataDir = config.douyin.userDataDir;
+  const handlers = {};
+  const cleared = [];
+  const navigations = [];
+  config.douyin.cookie = '';
+  config.douyin.userDataDir = '/tmp/douyin-parser-test-profile';
+  const page = {
+    setUserAgent: async () => {},
+    setRequestInterception: async () => {},
+    on: (event, handler) => { handlers[event] = handler; },
+    off: (event) => { delete handlers[event]; },
+    goto: async (url) => {
+      navigations.push(url);
+      if (url === 'about:blank') return;
+      await handlers.response({
+        url: () => 'https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=123',
+        status: () => 200,
+        json: async () => ({ status_code: 0, aweme_detail: { desc: 'test' } })
+      });
+    },
+    evaluate: async (fn, preserveSession) => {
+      const vm = require('node:vm');
+      vm.runInNewContext(`(${fn.toString()})(preserveSession)`, {
+        preserveSession,
+        window: {
+          localStorage: { clear: () => cleared.push('local') },
+          sessionStorage: { clear: () => cleared.push('session') }
+        }
+      });
+    }
+  };
+  try {
+    await executeTask({ page, data: 'https://www.douyin.com/video/123' });
+    assert.deepEqual(cleared, []);
+    config.douyin.userDataDir = '';
+    await executeTask({ page, data: 'https://www.douyin.com/video/123' });
+    assert.deepEqual(cleared, ['local', 'session']);
+    assert.equal(navigations.filter((url) => url === 'about:blank').length, 2);
+  } finally {
+    config.douyin.cookie = originalCookie;
+    config.douyin.userDataDir = originalUserDataDir;
+  }
+});
+
+test('launchBrowser 会话初始化与服务应共用目录和可执行文件，支持可视模式', async () => {
+  const puppeteer = require('puppeteer-extra');
+  const originalLaunch = puppeteer.launch;
+  const originalConfig = { ...config.douyin };
+  const calls = [];
+  puppeteer.launch = async (options) => { calls.push(options); };
+  try {
+    Object.assign(config.douyin, {
+      headless: true, userDataDir: '/tmp/douyin-test-session', executablePath: '/tmp/test-chrome'
+    });
+    await browserPool.launchBrowser();
+    await browserPool.launchBrowser({ headless: false });
+    config.douyin.headless = false;
+    await browserPool.launchBrowser();
+    assert.deepEqual(calls.map((call) => call.headless), ['new', false, false]);
+    for (const options of calls) {
+      assert.equal(options.userDataDir, '/tmp/douyin-test-session');
+      assert.equal(options.executablePath, '/tmp/test-chrome');
+    }
+  } finally {
+    puppeteer.launch = originalLaunch;
+    Object.assign(config.douyin, originalConfig);
   }
 });
 

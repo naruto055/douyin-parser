@@ -125,7 +125,7 @@ async function tryParseWithHttpDetail(url) {
     const data = response?.data;
     if (data && data.status_code === 0 && data.aweme_detail) {
       const result = extractVideoInfo(data);
-      if (result && (result.title || result.cover || result.videoUrl)) {
+      if (result && (result.videoUrl || result.audioUrl)) {
         result.source = 'http_detail';
         return normalizeParseResult(result);
       }
@@ -478,14 +478,27 @@ async function parseWithPuppeteer(url) {
     const apiData = await browserPool.execute(url);
     const result = extractVideoInfo(apiData);
 
-    // 至少需要拿到标题或封面之一，才认为结果具备可用价值。
-    if (result && (result.title || result.cover)) {
+    // 页面壳也可能有标题或封面，只有取得媒体地址才算解析成功。
+    if (result && (result.videoUrl || result.audioUrl)) {
       console.log(`Puppeteer parse succeeded in ${Date.now() - startTime}ms`);
       return normalizeParseResult(result);
     }
 
-    const error = new Error('Puppeteer parse returned no useful data');
-    error.puppeteerDiagnostics = result?.puppeteerDiagnostics || apiData?.__diagnostics || null;
+    const diagnostics = result?.puppeteerDiagnostics || apiData?.__diagnostics || null;
+    let message = 'Puppeteer parse returned no useful data';
+    if (diagnostics?.pageVerificationRequired) {
+      message = '抖音页面要求安全验证，当前浏览器会话无法获取视频详情';
+    } else if (diagnostics?.detailFailureReason === 'login_required') {
+      message = '抖音详情接口要求登录，当前浏览器会话无法获取视频详情';
+    } else if (diagnostics?.detailFailureReason === 'access_denied') {
+      message = '抖音详情接口拒绝访问，请检查平台访问限制';
+    } else if (diagnostics?.detailResponseEmpty) {
+      message = '抖音详情接口返回空响应，可能需要登录或完成平台安全验证';
+    } else if (diagnostics?.detailApiMatched === false) {
+      message = '等待抖音详情接口超时，页面未返回可下载媒体';
+    }
+    const error = new Error(message);
+    error.puppeteerDiagnostics = diagnostics;
     throw error;
   } catch (error) {
     console.error(`Puppeteer parse failed in ${Date.now() - startTime}ms:`, error.message);
@@ -551,7 +564,15 @@ async function parse(url, options = {}) {
       console.log(`Parse completed in ${Date.now() - totalStartTime}ms`);
       return normalizeParseResult(fallbackResult);
     } catch (thirdPartyError) {
-      const parseError = new Error(thirdPartyError.message || puppeteerErrorMessage);
+      // 保留主链路已识别的受限/超时原因，第三方失败不能覆盖用户可操作的提示。
+      const hasFailureDiagnostics = puppeteerDiagnostics && (
+        puppeteerDiagnostics.pageVerificationRequired ||
+        puppeteerDiagnostics.detailFailureReason ||
+        puppeteerDiagnostics.detailApiMatched === false
+      );
+      const parseError = new Error(hasFailureDiagnostics
+        ? puppeteerErrorMessage
+        : thirdPartyError.message || puppeteerErrorMessage);
       parseError.puppeteerDiagnostics = puppeteerDiagnostics;
       parseError.data = {
         puppeteerDiagnostics,
