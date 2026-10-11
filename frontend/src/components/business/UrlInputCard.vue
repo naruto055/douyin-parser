@@ -23,7 +23,7 @@ const emit = defineEmits<{
       class="url-input"
       maxlength="1000"
       auto-height
-      placeholder="粘贴抖音分享链接，或完整分享文案"
+      placeholder="粘贴抖音或 B 站链接，或完整分享文案"
     />
 
     <view class="input-footer">

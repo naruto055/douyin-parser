@@ -27,7 +27,7 @@ function go(path: string) {
     <view class="page-container">
       <view class="hero">
         <view>
-          <text class="page-title">粘贴抖音链接，提取视频和音频</text>
+          <text class="page-title">粘贴链接，提取视频和音频</text>
           <text class="page-subtitle">一个工作台完成解析、复制和下载。</text>
         </view>
         <text v-if="appStore.health" class="health">服务在线</text>
@@ -36,7 +36,7 @@ function go(path: string) {
       <view class="desktop-grid">
         <view class="section-card nav-card" @tap="go('/pages/parser/index')">
           <text class="section-title">进入解析工作台</text>
-          <text class="section-desc">粘贴抖音链接或分享文案，解析后直接处理视频和音频资源。</text>
+          <text class="section-desc">支持抖音、B 站链接和分享文案，解析后直接处理视频和音频资源。</text>
           <view class="button-row">
             <button class="primary-button">开始解析</button>
           </view>

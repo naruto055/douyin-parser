@@ -12,8 +12,15 @@ const { result, mode = 'video' } = defineProps<{
     <image v-if="result.cover" class="cover" :src="result.cover" mode="aspectFill" />
     <view class="content">
       <text class="title">{{ result.title || '未命名作品' }}</text>
+      <text class="meta">平台：{{ result.platform === 'bilibili' ? 'B 站' : '抖音' }}</text>
       <text class="meta">作者：{{ result.author || '未知' }}</text>
       <text class="meta">时长：{{ Math.round((result.duration || 0) / 1000) }} 秒</text>
+      <text v-if="result.platform === 'bilibili' && result.bilibili?.part" class="meta">
+        分 P：{{ result.bilibili.part }}
+      </text>
+      <text v-if="result.platform === 'bilibili' && result.bilibili?.bvid" class="meta">
+        BV 号：{{ result.bilibili.bvid }}
+      </text>
       <text v-if="mode === 'video' && result.videoCodec" class="meta">
         视频编码：{{ result.videoCodec }} {{ result.videoWidth || '-' }}x{{ result.videoHeight || '-' }}
       </text>

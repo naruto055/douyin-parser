@@ -4,7 +4,7 @@ import UrlInputCard from '@/components/business/UrlInputCard.vue'
 import ResultCard from '@/components/business/ResultCard.vue'
 import BaseState from '@/components/base/BaseState.vue'
 import { buildDownloadUrl, hasPublicDownloadBaseUrl } from '@/api/download'
-import { parseDouyin } from '@/api/parse'
+import { parseVideo } from '@/api/parse'
 import { useHistoryStore } from '@/stores/history'
 import { copyText } from '@/utils/clipboard'
 import { downloadMedia } from '@/utils/download'
@@ -17,11 +17,28 @@ const errorMessage = ref('')
 const result = ref<ParseResult | null>(null)
 const historyStore = useHistoryStore()
 
-const hasVideo = computed(() => Boolean(result.value?.videoUrl))
+const hasVideo = computed(() => Boolean(result.value?.shareUrl))
 const canDownloadVideo = computed(() => Boolean(result.value?.shareUrl))
 const hasAudio = computed(() => Boolean(result.value?.audioReady))
-const canDownloadAudio = computed(() => Boolean(result.value?.audioReady && result.value.shareUrl))
+const canDownloadAudio = computed(() => Boolean(hasAudio.value && result.value?.shareUrl))
 const downloadBaseReady = computed(() => hasPublicDownloadBaseUrl())
+const platformLabel = computed(() => result.value?.platform === 'bilibili' ? 'B 站' : '抖音')
+const platformMeta = computed(() => {
+  if (!result.value) return ''
+
+  if (result.value.platform !== 'bilibili') {
+    return '抖音视频'
+  }
+
+  const metadata = result.value.bilibili
+  const items = [
+    metadata?.part ? `分 P：${metadata.part}` : '',
+    metadata?.bvid ? `BV：${metadata.bvid}` : '',
+    metadata?.quality ? `清晰度：${metadata.quality}` : '',
+  ].filter(Boolean)
+
+  return items.join(' · ') || 'B 站视频'
+})
 const videoMeta = computed(() => {
   if (!result.value) return '等待解析'
 
@@ -35,6 +52,13 @@ const videoMeta = computed(() => {
 
   return items.join(' · ') || '视频资源'
 })
+const videoDescription = computed(() => {
+  if (!result.value) return ''
+  if (result.value.requiresMuxing) {
+    return 'B 站视频和音频会自动整理为完整视频文件。'
+  }
+  return videoMeta.value
+})
 
 onMounted(() => {
   if (historyStore.currentResult) {
@@ -46,7 +70,7 @@ onMounted(() => {
 async function submit() {
   const value = url.value.trim()
   if (!value) {
-    errorMessage.value = '请先粘贴抖音分享链接'
+    errorMessage.value = '请先粘贴抖音或 B 站分享链接'
     return
   }
 
@@ -54,7 +78,7 @@ async function submit() {
   errorMessage.value = ''
 
   try {
-    const parsed = await parseDouyin({ url: value })
+    const parsed = await parseVideo({ url: value })
     result.value = parsed
     historyStore.setCurrentResult(parsed)
     historyStore.addRecord(parsed)
@@ -135,7 +159,7 @@ function copyShareUrl() {
         <UrlInputCard
           v-model="url"
           title="输入链接"
-          description="粘贴抖音链接或分享文案，解析成功后会保存到本机历史。"
+          description="粘贴抖音或 B 站链接、短链接或分享文案，解析成功后会保存到本机历史。"
           submit-text="开始解析"
           :loading="loading"
           @submit="submit"
@@ -148,9 +172,9 @@ function copyShareUrl() {
 
           <template v-else>
             <view class="result-summary">
-              <text class="summary-label">解析完成</text>
+              <text class="summary-label">{{ platformLabel }} · 解析完成</text>
               <text class="summary-title">{{ result.title || '未命名作品' }}</text>
-              <text class="summary-desc">已为你整理好可用资源，选择下方操作即可。</text>
+              <text class="summary-desc">{{ platformMeta }}，已为你整理好可用资源。</text>
               <text v-if="!downloadBaseReady" class="summary-warning">
                 当前下载链接暂不可用，请稍后再试。
               </text>
@@ -175,7 +199,7 @@ function copyShareUrl() {
                 <text class="resource-state">{{ hasVideo ? '可用' : '不可用' }}</text>
               </view>
               <text class="resource-desc">
-                {{ videoMeta }}
+                {{ videoDescription }}
               </text>
               <view class="button-row">
                 <button class="secondary-button" :disabled="!canDownloadVideo || !downloadBaseReady" @tap="download('video')">

@@ -3,7 +3,7 @@ import type { ParseRequest, ParseResult } from '@/types/parse'
 
 type BackendParseResult = Omit<ParseResult, 'shareUrl'>
 
-export async function parseDouyin(params: ParseRequest): Promise<ParseResult> {
+export async function parseVideo(params: ParseRequest): Promise<ParseResult> {
   const result = await request<BackendParseResult, ParseRequest>({
     url: '/api/parse',
     method: 'POST',
@@ -16,10 +16,8 @@ export async function parseDouyin(params: ParseRequest): Promise<ParseResult> {
   }
 }
 
-export const parseVideo = parseDouyin
-
 export async function parseAudio(params: ParseRequest): Promise<ParseResult> {
-  const result = await parseDouyin(params)
+  const result = await parseVideo(params)
 
   if (!result.audioReady || !result.audioUrl) {
     throw {
